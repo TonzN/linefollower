@@ -1,0 +1,8 @@
+//
+// Created by tonzg on 05/10/2026.
+//
+
+#ifndef LINJEFØLGER1_LINEFOLLOW_H
+#define LINJEFØLGER1_LINEFOLLOW_H
+
+#endif //LINJEFØLGER1_LINEFOLLOW_H
