@@ -28,27 +28,27 @@ const int CENTER = 2500;
 // +1 når linje til venstre gir negativ feil. Sett -1 hvis statisk sensortest viser motsatt fortegn.
 const int SENSOR_DIRECTION = 1;
 // Grunn-PWM på stabil rett linje. Høyere gir mer fart og krever raskere korrigering.
-const float BASE_SPEED = 220.0f;
+const float BASE_SPEED = 250.0f;
 // Grunn-PWM i svinger/ved gjenfinning, ikke minste PWM per hjul. Lavere gir roligere kjøring, men kan gi stillstand.
-const float CORNER_SPEED = 140.0f;
+const float CORNER_SPEED = 200.0f;
 // Tak per motor. Høyere gir kraftigere ytre hjul i svinger; begge mål skaleres sammen ved metning.
 const float MOTOR_LIMIT = 250.0f;
 // P-forsterkning i PWM per posisjonsenhet. Høyere følger avvik hardere, men kan øke pendling.
-const float KP = 0.045f;
+const float KP = 0.04f;
 // D-forsterkning i PWM per posisjonsenhet/sekund. Høyere demper bevegelse over linjen, men forsterker støy.
-const float KD = 0.0055f;
+const float KD = 0.006f;
 // D-filterets tidskonstant i sekunder. Høyere filtrerer mer, men forsinker dempingen.
-const float D_FILTER_SECONDS = 0.020f;
+const float D_FILTER_SECONDS = 0.015f;
 // Tak på svingkorreksjonen i PWM. Høyere gir krappere svinger; indre hjul kan stoppe.
-const float MAX_TURN = 115.0f;
+const float MAX_TURN = 250.0f;
 // Fartstap per posisjonsenhet. Høyere senker farten mer ved avvik fra sentrum.
-const float ERROR_SPEED_DROP = 0.015f;
+const float ERROR_SPEED_DROP = 0.05f;
 // Fartstap per posisjonsenhet/sekund. Høyere holder farten lavere mens roboten krysser linjen raskt.
 const float RATE_SPEED_DROP = 0.001f;
 // Maks økning av grunn-PWM per sekund. Lavere gir langsommere akselerasjon etter svinger.
-const float BASE_ACCEL = 29.0f;
+const float BASE_ACCEL = 80.0f;
 // Maks økning av hver motors PWM-magnitude per sekund. Lavere gir mykere, men tregere styrerespons.
-const float MOTOR_ACCEL = 850.0f;
+const float MOTOR_ACCEL = 1200.0f;
 // Maks reduksjon av hver motors PWM-magnitude per sekund. Høyere bremser/reverserer raskere.
 const float MOTOR_DECEL = 1200.0f;
 // Maks tidssteg for utgangsrampen i sekunder. Lavere begrenser PWM-hopp etter en forsinket oppdatering.
@@ -64,7 +64,7 @@ const uint32_t STABLE_TIME_MS = 160;
 // Minste toppverdi for en troverdig linje (0–1000). Høyere avviser mer bakgrunn, men også svak linje.
 const uint16_t LINE_MIN_PEAK = 850;
 // Verdier under dette bidrar ikke til posisjonen. Høyere fjerner mer bakgrunn, men gjør posisjonen grovere.
-const uint16_t SENSOR_FLOOR = 700;
+const uint16_t SENSOR_FLOOR = 650;
 // Minste forskjell mellom høyeste/laveste sensor. Høyere krever tydeligere kontrast mot underlaget.
 const uint16_t LINE_MIN_CONTRAST = 300;
 // Maks antall sterke sensorer i valgt gruppe. Høyere godtar bredere linjer/felt.
@@ -75,12 +75,12 @@ const uint8_t CORE_PERCENT = 50;
 // Høyere avviser flere tvetydige mønstre; lavere kan velge feil linje ved flere streker.
 const uint8_t GROUP_DOMINANCE = 3;
 // Ugyldig signal må vare så mange ms før fullt søk. Høyere tåler flere glipper, men reagerer senere på tap.
-const uint32_t LOSS_CONFIRM_MS = 30;
+const uint32_t LOSS_CONFIRM_MS = 4;
 // PWM-reduksjon per sekund i korte glipper. Høyere bremser hardere før bekreftet tap.
-const float GAP_DECEL = 300.0f;
+const float GAP_DECEL = 600.0f;
 // Opptrapping av grunn-PWM per sekund under CORNER_SPEED, også ved start/gjenfunn.
 // Høyere kommer raskere ut av motorenes svake lav-PWM-område; hjulrampene gjelder fortsatt.
-const float RESTART_ACCEL = 300.0f;
+const float RESTART_ACCEL = 900.0f;
 // Minste rotasjons-PWM ved bekreftet linje ute på kanten. Høyere retter raskere, men øker oversving.
 const float ALIGN_MIN_SPEED = 60.0f;
 // PWM under søk. Høyere roterer raskere, men kan passere linjen før gjenfunn bekreftes.
@@ -128,5 +128,12 @@ const int WEAK_MAX_SHIFT = 350;
 const uint32_t AMBIGUOUS_TIMEOUT_MS = 250;
 // Maks reduksjon av grunn-PWM per sekund under vanlig følging. Høyere bremser tidligere inn i svinger.
 const float BASE_DECEL = 800.0f;
+// Avvik før ekstra svingstyrke begynner.
+// Lavere gir tidligere ekstra styring, men påvirker også slake svinger mer.
+const int EXTRA_TURN_START = 1200;
+
+// Ekstra P-forsterkning over grensen, i PWM per posisjonsenhet.
+// Høyere gir kraftigere styring ved store avvik, men øker risikoen for oversving.
+const float EXTRA_TURN_GAIN = 0.03f;
 
 #endif
