@@ -7,6 +7,15 @@
 #include "motor.h"
 #include "conf.h"
 #include "helper.h"
+#include "recovery_conf.h"
+
+// Egen nedbremsing ved gjenfunn; normal motorakselerasjon beholdes.
+// Retningsskifte går gjennom null før motsatt pådrag neste oppdatering.
+static float rampCapture(float value, float target, float dt) {
+    if (value * target < 0) target = 0;
+    float rate = magnitude(target) > magnitude(value) ? MOTOR_ACCEL : RECOVERY_BRAKE_RATE;
+    return approach(value, target, rate * dt);
+}
 
 // Samme fremdriftsandel på begge hjul hindrer at vekslende korreksjoner bremser ned begge.
 // Recovery og stopp bruker fortsatt de separate, raske bremserampene.
@@ -21,7 +30,7 @@ void rampFollowing(float &left, float &right, float targetLeft, float targetRigh
     right += fraction * deltaRight;
 }
 
-LineReading analyzeLine(const uint16_t *values) {
+LineReading analyzeLine(const unsigned int *values) {
   LineReading result;
   uint16_t lowest = values[0], weights[SensorCount];
   for (uint8_t i = 0; i < SensorCount; i++) {
@@ -138,12 +147,6 @@ void LineController::update(const LineReading &observation, uint32_t now) {
             derivativeReady = false;
             derivative = 0;
 
-            if (ambiguous) {
-                left = approach(left, 0, GAP_DECEL * rampDt);
-                right = approach(right, 0, GAP_DECEL * rampDt);
-                return;
-            }
-
             if ((uint32_t)(now - lossStart) < LOSS_CONFIRM_MS) {
                 left = approach(left, 0, GAP_DECEL * rampDt);
                 right = approach(right, 0, GAP_DECEL * rampDt);
@@ -157,6 +160,9 @@ void LineController::update(const LineReading &observation, uint32_t now) {
 
             searchSide = lastSide ? lastSide : UNKNOWN_SEARCH_SIDE;
             recovering = true;
+            captureSeen = false;
+            captureSide = 0;
+            captureSamples = 0;
             // Med et ferskt sidehint begynner styringen straks.
             // Uten sidehint beholdes nedbremsing før søk i standardretningen.
             braking = (lastSide == 0);
@@ -168,138 +174,133 @@ void LineController::update(const LineReading &observation, uint32_t now) {
     }
 
     if (recovering) {
-        if (ambiguous) {
-            candidate = false;
-            aligning = false;
-            braking = true;
-
-            brake(rampDt);
-
-            if ((uint32_t)(now - lossStart) >= SEARCH_TIMEOUT_MS) {
-                stop();
-            }
-
-            return;
-        }
-
-        if (line.valid) {
-            if (!candidate ||
-                magnitude(line.error - candidateError) > REACQUIRE_MAX_STEP) {
-                candidateStart = now;
-                candidate = true;
-                aligning = false;
-            }
-
-            candidateError = line.error;
-            braking = true;
-        } else {
-            candidate = false;
-            aligning = false;
-        }
-
         uint32_t elapsed = (uint32_t)(now - lossStart);
-
         if (elapsed >= SEARCH_TIMEOUT_MS &&
-            (!candidate ||
-             elapsed >= SEARCH_TIMEOUT_MS + REACQUIRE_GRACE_MS)) {
+            (!line.valid || elapsed >= SEARCH_TIMEOUT_MS + REACQUIRE_GRACE_MS)) {
             stop();
             return;
         }
 
-        bool confirmed =
-            candidate &&
-            (uint32_t)(now - candidateStart) >= REACQUIRE_TIME_MS;
-
-        if (candidate) {
-            if (!confirmed || magnitude(line.error) <= REACQUIRE_ERROR) {
-                // Bekreftet sentralt treff kan overtas uten full stopp
-                // når begge motorutgangene fortsatt driver fremover.
-                bool rollingResume =
-                    confirmed &&
-                    magnitude(line.error) <= STABLE_ERROR &&
-                    left > 0 &&
-                    right > 0;
-
-                aligning = false;
-
-                if (!rollingResume) {
-                    brake(rampDt);
-
-                    if (!confirmed || left != 0 || right != 0) {
-                        return;
-                    }
-                }
-
-                recovering = false;
-                gapActive = false;
-                braking = false;
-                candidate = false;
-                derivativeReady = false;
-                derivative = 0;
-                stableTiming = false;
-                lastSide = 0;
-
-                // Gjennomsnittlig gjenværende PWM; null etter full nedbremsing.
-                base = limitValue(
-                    (left + right) * 0.5f,
-                    0.0f,
-                    CORNER_SPEED
-                );
-            } else {
-                int observedSide = line.error > 0 ? 1 : -1;
-
-                if (aligning && observedSide != searchSide) {
-                    aligning = false;
-                    candidateStart = now;
-                    brake(rampDt);
+        if (!line.valid) {
+            candidate = false;
+            captureSamples = 0;
+            aligning = false;
+            captureRate = 0;
+            if (captureSeen) {
+                // Et kort treff skal ikke glemmes og føre til full søkefart
+                // i en retning som siste sterke posisjon motsier.
+                uint32_t age = (uint32_t)(now - captureTime);
+                float searchSpeed = limitValue(SEARCH_SPEED, 0, RECOVERY_SEARCH_LIMIT);
+                searchSpeed = limitValue(searchSpeed, 0, MOTOR_LIMIT);
+                if (captureSide == 0) {
+                    float speed = age < RECOVERY_HOLD_MS ? 0 :
+                        searchSpeed;
+                    left = rampCapture(left, searchSide * speed, rampDt);
+                    right = rampCapture(right, -searchSide * speed, rampDt);
                     return;
                 }
-
-                if (!aligning) {
-                    brake(rampDt);
-
-                    if (left == 0 && right == 0) {
-                        // Bare et bekreftet sidefunn får endre søkeretningen.
-                        searchSide = observedSide;
-                        aligning = true;
-                    }
-
-                    return;
-                }
-
-                float turn = limitValue(
-                    KP * magnitude(line.error),
-                    ALIGN_MIN_SPEED,
-                    SEARCH_SPEED
-                );
-
-                left = rampMotor(left, searchSide * turn, rampDt);
-                right = rampMotor(right, -searchSide * turn, rampDt);
-                return;
-            }
-        } else {
-            if (braking) {
+                searchSide = captureSide;
+                // Kort demping etter treff; deretter ramper søket opp igjen.
+                // Siste troverdige side beholdes, uten tidsstyrt retningsbytte.
+                float speed = age < RECOVERY_HOLD_MS
+                    ? limitValue(searchSpeed, 0, RECOVERY_HOLD_TURN) : searchSpeed;
+                left = rampCapture(left, searchSide * speed, rampDt);
+                right = rampCapture(right, -searchSide * speed, rampDt);
+            } else if (braking) {
                 brake(rampDt);
-
-                if (left == 0 && right == 0) {
-                    braking = false;
-                }
+                if (left == 0 && right == 0) braking = false;
             } else {
-                left = rampMotor(
-                    left,
-                    searchSide * SEARCH_SPEED,
-                    rampDt
-                );
-
-                right = rampMotor(
-                    right,
-                    -searchSide * SEARCH_SPEED,
-                    rampDt
-                );
+                float speed = limitValue(SEARCH_SPEED, 0, RECOVERY_SEARCH_LIMIT);
+                speed = limitValue(speed, 0, MOTOR_LIMIT);
+                left = rampMotor(left, searchSide * speed, rampDt);
+                right = rampMotor(right, -searchSide * speed, rampDt);
             }
-
             return;
         }
+
+        // Bekreftelse av linjetilstedeværelse og måling av bevegelse er separate.
+        bool continuous = candidate &&
+            magnitude(line.error - candidateError) <= REACQUIRE_MAX_STEP;
+        if (!candidate) candidateStart = now;
+        if (!continuous) {
+            captureRate = 0;
+            captureSamples = 1;
+        } else {
+            float sampleDt = (uint32_t)(now - captureTime) / 1000.0f;
+            if (sampleDt > 0) {
+                float rate = (line.error - candidateError) / sampleDt;
+                float alpha = sampleDt / (D_FILTER_SECONDS + sampleDt);
+                captureRate += alpha * (rate - captureRate);
+                if (captureSamples < 2) captureSamples++;
+            }
+        }
+        candidate = true;
+        captureSeen = true;
+        candidateError = line.error;
+        captureTime = now;
+        braking = false;
+        aligning = true;
+
+        if (magnitude(line.error) >= RECOVERY_DIRECTION_ERROR) {
+            // Sterk linje på motsatt side er et nytt mål for rolig innretting,
+            // ikke tillatelse til full søkerotasjon. Hjulene må fortsatt via null.
+            captureSide = line.error > 0 ? 1 : -1;
+            searchSide = captureSide;
+        } else if (captureSamples >= 2 && magnitude(captureRate) > RECOVERY_FORWARD_RATE) {
+            captureSide = captureRate > 0 ? 1 : -1;
+        } else {
+            captureSide = 0;
+        }
+
+        float captureLimit = limitValue(RECOVERY_CAPTURE_LIMIT, 0, MOTOR_LIMIT);
+        float dTurn = limitValue(KD * captureRate, -captureLimit, captureLimit);
+        float turn = limitValue(KP * line.error + dTurn, -captureLimit, captureLimit);
+        // Langt fra sentrum får D-leddet bremse helt, men ikke drive bort fra linjen.
+        if (magnitude(line.error) > RECOVERY_FORWARD_ERROR && turn * line.error < 0) turn = 0;
+        bool approachingFast = line.error * captureRate < 0 &&
+            magnitude(captureRate) > RECOVERY_FORWARD_RATE;
+        if (magnitude(line.error) > RECOVERY_FORWARD_ERROR && !approachingFast) {
+            float minimumTurn = limitValue(ALIGN_MIN_SPEED, 0, captureLimit);
+            if (magnitude(turn) < minimumTurn) turn = line.error > 0 ? minimumTurn : -minimumTurn;
+        }
+
+        bool confirmed = (uint32_t)(now - candidateStart) >= REACQUIRE_TIME_MS;
+        bool forwardReady = confirmed && captureSamples >= 2 &&
+            magnitude(line.error) <= RECOVERY_FORWARD_ERROR &&
+            magnitude(captureRate) <= RECOVERY_FORWARD_RATE;
+        float drive = limitValue((left + right) * 0.5f, 0, MOTOR_LIMIT);
+        // Bygg litt fremdrift under sentrering; full overtakelse krever fortsatt bekreftelse.
+        float approachDrive = magnitude(line.error) <= RECOVERY_FORWARD_ERROR
+            ? limitValue(RECOVERY_APPROACH_DRIVE, 0, CORNER_SPEED) : 0;
+        float targetDrive = forwardReady ? CORNER_SPEED : approachDrive;
+        float driveRate = targetDrive > drive ? RESTART_ACCEL : BASE_DECEL;
+        drive = approach(drive, targetDrive, driveRate * rampDt);
+        drive = limitValue(drive, 0, MOTOR_LIMIT - magnitude(turn));
+        left = rampCapture(left, drive + turn, rampDt);
+        right = rampCapture(right, drive - turn, rampDt);
+
+        if (!forwardReady || left < 0 || right < 0 ||
+            magnitude((left - right) * 0.5f) > RECOVERY_EXIT_TURN) return;
+
+        recovering = false;
+        gapActive = false;
+        braking = false;
+        candidate = false;
+        aligning = false;
+        captureSeen = false;
+        captureSide = 0;
+        captureSamples = 0;
+        derivativeReady = false;
+        derivative = 0;
+        previousError = line.error;
+        stableTiming = false;
+        base = limitValue((left + right) * 0.5f, 0, CORNER_SPEED);
+        haveStrong = true;
+        strongTime = now;
+        strongError = line.error;
+        lastSide = magnitude(line.error) > SIDE_MEMORY_ERROR ? (line.error > 0 ? 1 : -1) : 0;
+        sideTime = now;
+        return;
     }
 
     int error = line.error;

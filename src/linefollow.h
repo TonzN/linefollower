@@ -2,6 +2,7 @@
 // Created by tonzg on 05/10/2026.
 //
 #pragma once
+#include <stdint.h>
 
 #ifndef LINEFOLLOWER_FOLLOW_H
 #define LINEFOLLOWER_FOLLOW_H
@@ -30,7 +31,11 @@ struct LineController
     uint32_t strongTime = 0, uncertainStart = 0;
 
 
-    // resten av variablene dine
+    float captureRate = 0;
+    uint32_t captureTime = 0;
+    bool captureSeen = false;
+    int captureSide = 0;
+    uint8_t captureSamples = 0;
 
     void update(const LineReading &line, uint32_t now);
     void stop();
@@ -38,6 +43,6 @@ struct LineController
     void brake(float dt);
 };
 
-LineReading analyzeLine(const uint16_t *values);
+LineReading analyzeLine(const unsigned int *values);
 
 #endif

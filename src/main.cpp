@@ -95,7 +95,7 @@ void setup() {
   pinMode(BIN2, OUTPUT);
   pinMode(PWMB, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Starting");
 
   reflectanceSensor.init();
@@ -117,7 +117,7 @@ void setup() {
 void loop() {
   if (digitalRead(START) == LOW && RUNNED == false) {
     RUNNED = true;
-    follow2(40000); // Maks kjøretid i ms. Høyere kjører lenger uten stoppetrykk.
+    follow2(1000000000); // Maks kjøretid i ms. Høyere kjører lenger uten stoppetrykk.
     RUNNED = false;
     waitForRelease(START);
   } else if (digitalRead(CALIBRATE) == LOW && CALIBRATED == false) {
