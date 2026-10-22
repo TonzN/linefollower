@@ -29,6 +29,7 @@ struct LineController
     bool haveStrong = false, uncertain = false;
     int strongError = 0;
     uint32_t strongTime = 0, uncertainStart = 0;
+    float uncertainLeft = 0, uncertainRight = 0;
 
 
     float captureRate = 0;
@@ -36,6 +37,8 @@ struct LineController
     bool captureSeen = false;
     int captureSide = 0;
     uint8_t captureSamples = 0;
+    int directionCandidateSide = 0;
+    uint32_t directionCandidateStart = 0;
 
     void update(const LineReading &line, uint32_t now);
     void stop();

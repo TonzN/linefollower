@@ -8,6 +8,8 @@
 #include "conf.h"
 #include "helper.h"
 #include "recovery_conf.h"
+#include "ambiguous_conf.h"
+#include "capture_conf.h"
 
 // Egen nedbremsing ved gjenfunn; normal motorakselerasjon beholdes.
 // Retningsskifte går gjennom null før motsatt pådrag neste oppdatering.
@@ -126,12 +128,42 @@ void LineController::update(const LineReading &observation, uint32_t now) {
         if (!uncertain) {
             uncertain = true;
             uncertainStart = now;
+            uncertainLeft = uncertainRight = 0;
+            bool recentLine = (haveStrong &&
+                (uint32_t)(now - strongTime) <= AMBIGUOUS_HINT_MS) ||
+                (recovering && captureSeen &&
+                (uint32_t)(now - captureTime) <= AMBIGUOUS_HINT_MS);
+            float peak = magnitude(left) > magnitude(right)
+                ? magnitude(left) : magnitude(right);
+            if (recentLine && peak > 0) {
+                // Behold forhold og fortegn fra faktisk utgang; ingen ny blind retning.
+                float speed = limitValue(AMBIGUOUS_ESCAPE_PWM, 0, MOTOR_LIMIT);
+                uncertainLeft = left / peak * speed;
+                uncertainRight = right / peak * speed;
+            }
         }
 
         if ((uint32_t)(now - uncertainStart) >= AMBIGUOUS_TIMEOUT_MS) {
             stop();
             return;
         }
+        if (recovering && (uint32_t)(now - lossStart) >= SEARCH_TIMEOUT_MS) {
+            stop();
+            return;
+        }
+        if (!recovering && !gapActive) { gapActive = true; lossStart = now; }
+        stableTiming = false;
+        derivativeReady = false;
+        derivative = 0;
+        candidate = false;
+        directionCandidateSide = 0;
+        captureSamples = 0;
+        captureRate = 0;
+        aligning = false;
+        bool moving = (uint32_t)(now - uncertainStart) < AMBIGUOUS_ESCAPE_MS;
+        left = rampCapture(left, moving ? uncertainLeft : 0, rampDt);
+        right = rampCapture(right, moving ? uncertainRight : 0, rampDt);
+        return;
     } else {
         uncertain = false;
     }
@@ -161,6 +193,7 @@ void LineController::update(const LineReading &observation, uint32_t now) {
             searchSide = lastSide ? lastSide : UNKNOWN_SEARCH_SIDE;
             recovering = true;
             captureSeen = false;
+            directionCandidateSide = 0;
             captureSide = 0;
             captureSamples = 0;
             // Med et ferskt sidehint begynner styringen straks.
@@ -182,6 +215,7 @@ void LineController::update(const LineReading &observation, uint32_t now) {
         }
 
         if (!line.valid) {
+            directionCandidateSide = 0;
             candidate = false;
             captureSamples = 0;
             aligning = false;
@@ -241,27 +275,71 @@ void LineController::update(const LineReading &observation, uint32_t now) {
         braking = false;
         aligning = true;
 
-        if (magnitude(line.error) >= RECOVERY_DIRECTION_ERROR) {
-            // Sterk linje på motsatt side er et nytt mål for rolig innretting,
-            // ikke tillatelse til full søkerotasjon. Hjulene må fortsatt via null.
-            captureSide = line.error > 0 ? 1 : -1;
-            searchSide = captureSide;
-        } else if (captureSamples >= 2 && magnitude(captureRate) > RECOVERY_FORWARD_RATE) {
-            captureSide = captureRate > 0 ? 1 : -1;
-        } else {
+        // Synlig styring reagerer straks; blind søkeretning krever vedvarende sidefunn.
+        int observedSide = magnitude(line.error) >= RECOVERY_DIRECTION_ERROR
+            ? (line.error > 0 ? 1 : -1) : 0;
+        if (observedSide == 0) {
+            directionCandidateSide = 0;
             captureSide = 0;
+        } else if (observedSide == searchSide) {
+            directionCandidateSide = 0;
+            captureSide = searchSide;
+        } else {
+            if (directionCandidateSide != observedSide) {
+                directionCandidateSide = observedSide;
+                directionCandidateStart = now;
+            }
+            captureSide = 0;
+            if ((uint32_t)(now - directionCandidateStart) >= RECOVERY_DIRECTION_CONFIRM_MS) {
+                searchSide = observedSide;
+                captureSide = observedSide;
+                directionCandidateSide = 0;
+            }
         }
 
-        float captureLimit = limitValue(RECOVERY_CAPTURE_LIMIT, 0, MOTOR_LIMIT);
-        float dTurn = limitValue(KD * captureRate, -captureLimit, captureLimit);
+        float distance = magnitude(line.error);
+        float boostStart = RECOVERY_FAR_START_ERROR > RECOVERY_FORWARD_ERROR
+            ? RECOVERY_FAR_START_ERROR : RECOVERY_FORWARD_ERROR;
+        float boostEnd = RECOVERY_FAR_FULL_ERROR > boostStart
+            ? RECOVERY_FAR_FULL_ERROR : boostStart + 1;
+        float farWeight = limitValue((distance - boostStart) / (boostEnd - boostStart), 0, 1);
+        farWeight = farWeight * farWeight * (3 - 2 * farWeight);
+        float nearLimit = limitValue(RECOVERY_CAPTURE_LIMIT, 0, MOTOR_LIMIT);
+        float farTurn = limitValue(RECOVERY_FAR_TURN, nearLimit, MOTOR_LIMIT);
+        float captureLimit = nearLimit + farWeight * (farTurn - nearLimit);
+        float dLimit = limitValue(RECOVERY_D_LIMIT, 0, captureLimit);
+        float dTurn = limitValue(KD * captureRate, -dLimit, dLimit);
         float turn = limitValue(KP * line.error + dTurn, -captureLimit, captureLimit);
-        // Langt fra sentrum får D-leddet bremse helt, men ikke drive bort fra linjen.
-        if (magnitude(line.error) > RECOVERY_FORWARD_ERROR && turn * line.error < 0) turn = 0;
-        bool approachingFast = line.error * captureRate < 0 &&
-            magnitude(captureRate) > RECOVERY_FORWARD_RATE;
-        if (magnitude(line.error) > RECOVERY_FORWARD_ERROR && !approachingFast) {
+        if (line.error != 0) {
+            float side = line.error > 0 ? 1.0f : -1.0f;
+            float distance = magnitude(line.error);
+            float centerRange = RECOVERY_FORWARD_ERROR > 0 ? RECOVERY_FORWARD_ERROR : 1;
+            float fullRange = RECOVERY_FULL_ALIGN_ERROR > centerRange
+                ? RECOVERY_FULL_ALIGN_ERROR : centerRange;
+            float rateRange = RECOVERY_FORWARD_RATE > 0 ? RECOVERY_FORWARD_RATE : 1;
+            float approaching = limitValue(-side * captureRate / rateRange, 0, 1);
             float minimumTurn = limitValue(ALIGN_MIN_SPEED, 0, captureLimit);
-            if (magnitude(turn) < minimumTurn) turn = line.error > 0 ? minimumTurn : -minimumTurn;
+            minimumTurn *= limitValue(distance / fullRange, 0, 1);
+            minimumTurn *= 1 - approaching *
+                (1 - limitValue(RECOVERY_MOVING_MIN_FACTOR, 0, 1));
+
+            // Eget pådrag langt ute; den opprinnelige sentreringen beholdes nær midten.
+            float farMinimum = farTurn * (1 - approaching *
+                (1 - limitValue(RECOVERY_FAR_MOVING_FACTOR, 0, 1)));
+            minimumTurn += farWeight * (farMinimum - minimumTurn);
+
+            // Unngå svakt pådrag like utenfor området der fremdriften overtar.
+            float bridgeMinimum = limitValue(RECOVERY_BRIDGE_MIN_TURN, 0, captureLimit)
+                * limitValue(distance / centerRange, 0, 1);
+            if (minimumTurn < bridgeMinimum) minimumTurn = bridgeMinimum;
+
+            // Jevn overgang: behold innstyring langt ute, tillat motdemping nær sentrum.
+            float weight = limitValue(distance / centerRange, 0, 1);
+            weight = weight * weight * (3 - 2 * weight); // Smoothstep, faste polynomkoeffisienter.
+            float lowerBound = minimumTurn - captureLimit * (1 - weight);
+            float directedTurn = side * turn;
+            if (directedTurn < lowerBound) directedTurn = lowerBound;
+            turn = side * limitValue(directedTurn, -captureLimit, captureLimit);
         }
 
         bool confirmed = (uint32_t)(now - candidateStart) >= REACQUIRE_TIME_MS;

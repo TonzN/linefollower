@@ -30,11 +30,11 @@
     // Grunn-PWM på stabil rett linje. Høyere gir mer fart og krever raskere korrigering.
     const float BASE_SPEED = 200.0f;
     // Grunn-PWM i svinger/ved gjenfinning, ikke minste PWM per hjul. Lavere gir roligere kjøring, men kan gi stillstand.
-    const float CORNER_SPEED = 160.0f;
+    const float CORNER_SPEED = 180.0f;
     // Tak per motor. Høyere gir kraftigere ytre hjul i svinger; begge mål skaleres sammen ved metning.
     const float MOTOR_LIMIT = 225.0f;
     // P-forsterkning i PWM per posisjonsenhet. Høyere følger avvik hardere, men kan øke pendling.
-    const float KP = 0.007;
+    const float KP = 0.005;
     // D-forsterkning i PWM per posisjonsenhet/sekund. Høyere demper bevegelse over linjen, men forsterker støy.
     const float KD = 0.008f;
     // D-filterets tidskonstant i sekunder. Høyere filtrerer mer, men forsinker dempingen.
@@ -46,9 +46,9 @@
     // Fartstap per posisjonsenhet/sekund. Høyere holder farten lavere mens roboten krysser linjen raskt.
     const float RATE_SPEED_DROP = 0.001f;
     // Maks økning av grunn-PWM per sekund. Lavere gir langsommere akselerasjon etter svinger.
-    const float BASE_ACCEL = 100.0f;
+    const float BASE_ACCEL = 150.0f;
     // Maks økning av hver motors PWM-magnitude per sekund. Lavere gir mykere, men tregere styrerespons.
-    const float MOTOR_ACCEL = 1000.0f;
+    const float MOTOR_ACCEL = 1400.0f;
     // Maks reduksjon av hver motors PWM-magnitude per sekund. Høyere bremser/reverserer raskere.
     const float MOTOR_DECEL = 1200.0f;
     // Maks tidssteg for utgangsrampen i sekunder. Lavere begrenser PWM-hopp etter en forsinket oppdatering.
@@ -80,11 +80,11 @@
     const float GAP_DECEL = 900.0f;
     // Opptrapping av grunn-PWM per sekund under CORNER_SPEED, også ved start/gjenfunn.
     // Høyere kommer raskere ut av motorenes svake lav-PWM-område; hjulrampene gjelder fortsatt.
-    const float RESTART_ACCEL = 800.0f;
+    const float RESTART_ACCEL = 1400.0f;
     // Minste rotasjons-PWM ved bekreftet linje ute på kanten. Høyere retter raskere, men øker oversving.
-    const float ALIGN_MIN_SPEED = 80.0f;
+    const float ALIGN_MIN_SPEED =  80.0f;
     // PWM under søk. Høyere roterer raskere, men kan passere linjen før gjenfunn bekreftes.
-    const float SEARCH_SPEED = 150.0f;
+    const float SEARCH_SPEED = 180.0f;
     // Maks tid fra første ugyldige måling i ms. Høyere gir lengre søk og større fare for å finne banen baklengs.
     const uint32_t SEARCH_TIMEOUT_MS = 560000;
     // Ekstra ms kun for et pågående gjenfunn ved fristen. Høyere utsetter absolutt stoppgrense.
