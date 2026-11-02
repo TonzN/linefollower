@@ -32,7 +32,7 @@ void rampFollowing(float &left, float &right, float targetLeft, float targetRigh
     right += fraction * deltaRight;
 }
 
-LineReading analyzeLine(const unsigned int *values) {
+LineReading analyzeLine(const uint16_t *values) {
   LineReading result;
   uint16_t lowest = values[0], weights[SensorCount];
   for (uint8_t i = 0; i < SensorCount; i++) {
@@ -68,8 +68,8 @@ LineReading analyzeLine(const unsigned int *values) {
   for (uint8_t i = first; i <= last; i++) {
     uint16_t weight = values[i] > POSITION_FLOOR ? values[i] - POSITION_FLOOR : 0;
     total += weight;
-    // 1000 er posisjonsskala per sensoravstand; 32-bit hindrer overflow på AVR.
-    weightedError += (int32_t)weight * ((int32_t)i * 1000 - CENTER);
+    // Fast skala over hele rekken, uavhengig av antall lesere. 32-bit for AVR.
+    weightedError += (int32_t)weight * ((int32_t)i * cfg::SensorPositionSpan / (SensorCount - 1) - CENTER);
   }
   result.error = SENSOR_DIRECTION * (int)(weightedError / total);
   result.strong = result.peak >= LINE_MIN_PEAK;

@@ -4,27 +4,14 @@
     #pragma once
 
     #include <stdint.h>
+    #include "board_config.h"
     #ifndef LINEFOLLOWER_CONF_H
     #define LINEFOLLOWER_CONF_H
 
-    const uint8_t SensorCount = 6;
+    const uint8_t SensorCount = cfg::SensorCount;
 
-    const int AIN1 = 13; // HØYRE
-    const int AIN2 = 12;
-    const int PWMA = 6;
-    const int BIN1 = 8; // VENSTRE
-    const int BIN2 = 9;
-    const int PWMB = 10;
-    const int START = 7;
-    const int CALIBRATE = 3;
-
-
-    // Original motoroffset. Behold 0 under tuning: originalfunksjonen legger dette til også ved reversering.
-    const int offsetA = 0;
-    const int offsetB = 0;
-
-    // Midten av seks sensorer (0–5000). Endres bare ved annen sensorgeometri.
-    const int CENTER = 2500;
+    // Midten av den normaliserte posisjonsskalaen for hele sensorrekken.
+    const int CENTER = cfg::SensorPositionSpan / 2;
     // +1 når linje til venstre gir negativ feil. Sett -1 hvis statisk sensortest viser motsatt fortegn.
     const int SENSOR_DIRECTION = 1;
     // Grunn-PWM på stabil rett linje. Høyere gir mer fart og krever raskere korrigering.
@@ -54,7 +41,7 @@
     // Maks tidssteg for utgangsrampen i sekunder. Lavere begrenser PWM-hopp etter en forsinket oppdatering.
     const float MAX_RAMP_DT = 0.020f;
     // Kontrollperiode i ms. Lavere leser oftere; D-leddet bruker faktisk tid og trenger ikke ny enhet ved endring.
-    const uint32_t CONTROL_PERIOD_MS = 8;
+    const uint32_t CONTROL_PERIOD_MS = cfg::ControlPeriodUs / 1000;
     // Feil som regnes som nær sentrum. Høyere tillater fartsøkning lenger fra midten.
     const int STABLE_ERROR = 200;
     // Maks feilendring/sekund for stabil følging. Høyere godtar mer bevegelse før farten øker.

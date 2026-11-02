@@ -1,213 +1,152 @@
-# Linjefølger – veiledning for gruppen
+# Linjefølger 2
 
-Denne roboten skal følge en linje ved å styre to motorer hver for seg. Den har Arduino Nano, en egen 3D-printet kropp og en sensorrekke med seks lesere foran motorene.
-
-Dokumentasjonen beskriver koden som ble lest 22. oktober 2026 i `C:\Users\tonzg\CLionProjects\LinjeFølger1`. Den er laget for at nye gruppemedlemmer skal kunne forstå koden og fortsette arbeidet. Oppkoblingen og kjøringen er ikke kontrollert på selve roboten.
+Ny arkitektur med **Nano for sensorer, motorer og regulering**, og **Uno for I²C-styring og USB mot PC**. Dette er et eget prosjekt. `LinjeFølger1`, den eldre mappen `LinjeFølger2` uten mellomrom og Python-simulatoren er ikke endret.
 
 ## Start her
 
-1. Les `src/main.cpp` for å forstå oppstart, knapper og kjøringen.
-2. Les `analyzeLine()` i `src/linefollow.cpp` for å se hvordan sensorverdier blir til en linjeposisjon.
-3. Les `LineController::update()` i samme fil for å forstå styringen.
-4. Bruk konfigurasjonsfilene når dere skal justere oppførselen.
+1. Åpne denne mappen i CLion: `C:\Users\tonzg\CLionProjects\linjefølger 2`.
+2. Les og fyll ut `include/board_config.h` når pinner og komponentmodellene er kjent.
+3. Bygg Nano og Uno med PlatformIO. Velg korrekt Nano-bootloader før senere opplasting.
+4. Begynn med `info`, deretter sensorer og timing. Motorforsøk kommer etter verifisert oppkobling.
 
-## Slik bruker dere roboten
+**Standardoppsettet driver ingen motorer.** `MotorsEnabled = false`, ukjente pinner er −1, og sensorbackend er `Unconfigured`. Programmet bygger i denne tilstanden, men avviser forsøk som trenger ukonfigurert maskinvare. Ingen firmware er automatisk lastet opp til kortene.
 
-1. Slå på roboten. Den kalibrerer automatisk ved oppstart.
-2. Før alle seks leserne over både linjen og underlaget under kalibreringen. Koden beveger ikke motorene under kalibrering, så dette må gjøres manuelt. Selve måleserien tar omtrent fire sekunder, i tillegg til oppstartstid og sensoravlesninger. Lampen lyser under serien.
-3. Plasser roboten med sensoren over linjen.
-4. Trykk START og slipp knappen. Roboten begynner å følge linjen.
-5. Trykk START på nytt for å stoppe. Knappen må først ha vært sluppet for at et nytt trykk skal stoppe kjøringen.
+## Hva som er implementert
 
-CALIBRATE starter en ny kalibrering når roboten ikke kjører. Denne knappen blir ikke behandlet under kjøring. Kalibreringen gjentas etter omstart; koden lagrer den ikke i permanent minne.
+- Fast kontrollperiode på Nano, foreløpig 8000 µs.
+- Maksimalt kontrollarbeid på 6000 µs og tillatt startforsinkelse på 1000 µs, begge konfigurerbare.
+- Måling av sensoravlesningstid, kontrollarbeid, kontrollperiode, startforsinkelse og tidsfristbrudd.
+- Stopp ved for lang kontrollrunde, for sen start under kjøring, sensorfeil eller tapt kommunikasjonslease.
+- Watchdog på Nano for blokkert programflyt. Den erstatter ikke kontrollrundens kortere tidsbudsjett.
+- I²C-pakker på 32 bytes med versjon, sekvensnummer og CRC8.
+- Frosset snapshot i flere sider. Uno setter sammen sensorverdier og timing fra samme kontrollrunde.
+- Enkel Python-testbenk for sensoropptak, kalibrering, timing, motorpådrag, PWM-sveip og linjefølging.
+- Gjenbruk av PD-, recovery- og tvetydighetslogikken fra første prosjekt.
 
-## Hva filene gjør
+## Hva er likt som før, og hva er nytt?
 
-| Fil | Innhold |
-| --- | --- |
-| `src/main.cpp` | Setter opp maskinvaren, kalibrerer, leser knapper og kobler sensorer, styring og motorer sammen. Skriver også diagnose til serieporten. |
-| `src/linefollow.h` | Beskriver `LineReading` og `LineController`, altså målingen og minnet styringen trenger. |
-| `src/linefollow.cpp` | Tolker sensorene, følger linjen, søker etter mistet linje og retter inn roboten ved gjenfunn. |
-| `src/motor.cpp` og `.h` | Sender retning og PWM til motorene. Inneholder også en funksjon for gradvise motorendringer. |
-| `src/helper.cpp` og `.h` | Små hjelpefunksjoner: begrense en verdi, finne absoluttverdi og bevege en verdi gradvis mot et mål. |
-| `src/conf.h` | Pinner og hovedinnstillinger for fart, styring, sensorgrenser og tidsfrister. |
-| `src/recovery_conf.h` | Innstillinger for søking og overgangen tilbake til vanlig følging. |
-| `src/capture_conf.h` | Finjustering av innretting når linjen blir synlig igjen. |
-| `src/ambiguous_conf.h` | Kort viderebevegelse gjennom et uklart sensorområde. |
-| `platformio.ini` | Valg av kort, Arduino-rammeverk og sensorbibliotek. |
+Regulatoren bygger på den tidligere `fase2`-koden i `LinjeFølger1`. PD-regulering, gjenfinning av mistet linje, håndtering av tvetydige målinger og motorramper er i hovedsak beholdt. Sensorposisjonen er nå normalisert over hele sensorrekken, slik at flere lesere ikke alene øker posisjonsfeilens skala. Terskler og tuning må likevel tilpasses den nye sensoren.
 
-## Fra sensor til motor
-
-Under kjøring går informasjonen denne veien:
+Det gamle `main.cpp` er erstattet av to programmer: `src/nano.cpp` og `src/uno.cpp`. Maskinvaretilgang, kalibreringsflyt, tidsplanlegging, feilstopper og testkommandoer er nye. Tidligere oppstartsknapper og motoroffset er ikke videreført i denne versjonen.
 
 ```text
-Seks sensorverdier
-    -> analyzeLine(): hvor er linjen, og er målingen troverdig?
-    -> control.update(): beregn venstre og høyre motorpådrag
-    -> spinMotorB(left) og spinMotorA(right)
+PC / hardware_testbed.py
+        | USB / seriell
+       Uno  (starter I²C-overføringene)
+        | I²C: kommandoer ned, måledata tilbake
+       Nano (leser sensorer, regulerer og styrer motorer)
 ```
 
-`follow2()` i `main.cpp` kjører denne runden med en ønsket periode på 8 ms. Sensorlesing og annen behandling kan gjøre at en runde tar lengre tid. Styringen bruker faktisk medgått tid i beregningene sine.
+Uno sender for eksempel en kommando om å starte en sensortest. Nano tar imot kommandoen, utfører testen og oppdaterer måledata. Når Uno ber om data, fryser Nano ett sammenhengende målebilde som Uno henter i flere pakker. Nano kjører kontrollsløyfen selv; Uno trenger ikke sende en kommando for hver kontrollrunde. Begge kort lastes med hvert sitt program fra samme prosjekt.
 
-### 1. Finne linjen
+`fase1` og den tidligere `fase2` var heller ikke identiske: `fase2` hadde blant annet endringer i gjenfinning, tvetydige linjefunn og regulatorverdier. Den gamle kildekodeforklaringen i `KODE_FORKLART.md` gjelder oppsettet før denne todelingen; bruk denne README-en for den nye programflyten. Git-historikken beholder den tidligere koden.
 
-`readLine(sensorValues)` fyller listen med kalibrerte verdier på skalaen 0–1000. Koden bruker disse verdiene, men ignorerer posisjonen som bibliotekets `readLine()` returnerer. Oppsettet forventer en mørk linje på et lysere underlag.
+## Konfigurasjon
 
-`analyzeLine()` gjør i hovedsak dette:
+`include/board_config.h` inneholder sensorantall, pinner, motorpolariteter, I²C-adresse, tidsgrenser, testgrenser og valgfritt måleutstyr.
 
-1. Finner høyeste og laveste sensorverdi og sjekker signalstyrke og kontrast.
-2. Samler sterke utslag i sammenhengende grupper.
-3. Velger den tydeligste gruppen. Flere konkurrerende grupper eller en for bred gruppe blir avvist.
-4. Beregner et vektet gjennomsnitt fra den valgte gruppen og nærmeste svake naboer. Større sensorutslag påvirker posisjonen mer.
+Antall lesere står foreløpig til **26** som oppgitt. Det er konfigurerbart. Avlesningsgrensesnittet til den nye sensoren er ikke gjettet ut fra antall pinner:
 
-Sensorene får posisjonene 0, 1000, 2000, 3000, 4000 og 5000. Midten er 2500, mellom de to midterste leserne.
+- **QtrRC / QtrAnalog:** direkte Pololu-avlesning med eksplisitte sensorpinner, via QTRSensors 4.0.0.
+- **Custom:** eget grensesnitt i `src/custom_sensor.cpp` hvis sensoroppsettet bruker andre signaler eller en mellomliggende modul.
+- **Unconfigured:** avlesning er deaktivert inntil oppsettet er kjent.
 
-```text
-feil = posisjon - 2500       (når SENSOR_DIRECTION = 1)
+Custom-adapteren returnerer foreløpig «ikke konfigurert». Den må implementeres når sensormodell og signalformat er kjent. Å fylle inn motorpinner alene gjør derfor ikke ukjent sensormaskinvare lesbar.
+
+Pinnekonfigurasjonen kontrollerer duplikater, I²C-pinner og gyldige PWM-/enkoderpinner for klassisk Nano. Den kan ikke verifisere ledninger eller en fremtidig Custom-adapters interne bruk av pinner. Eventuell driver-enable-/standby-pin bør kobles og konfigureres der driveren støtter det.
+
+Regulatorverdier står i `include/control/conf.h`, `recovery_conf.h`, `capture_conf.h` og `ambiguous_conf.h`. Gamle motor-/knappepinner er fjernet fra regulatorfilen.
+
+**Posisjonsskala:** sensorrekken normaliseres til `SensorPositionSpan`, som nå er 0–5000 med sentrum 2500. Det beholder omtrent samme feilenhet som den gamle seksleser-varianten. Antall sterke lesere, kontrastgrenser og regulatorverdier må fortsatt tunes til den nye sensoren og geometrien. `LINE_MAX_WIDTH` er fortsatt en grense i antall lesere.
+
+## Bygg i CLion / PlatformIO
+
+CMake-prosjektet gir CLion to kjørbare testmål: `runtime_tests` og `nano_runtime_tests`. Hvis PlatformIO finnes, finnes også mål for `firmware_nano` og `firmware_uno`.
+
+Fra terminalen i prosjektmappen:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e nano -e uno
 ```
 
-Med forventet sensorrekkefølge betyr negativ feil linje til venstre, positiv feil linje til høyre og feil nær null linje i midten. Dette må bekreftes med en statisk sensortest på roboten.
+`nano` bruker `nanoatmega328`. Alternativet `nano_new_bootloader` bruker `nanoatmega328new`. Byggearkitektur er den samme; korrekt bootloader/opplastingsvalg må bekreftes for kortet deres.
 
-Resultatet lagres i `LineReading`:
+## Hardware-testbenken
 
-| Felt | Betydning |
-| --- | --- |
-| `error` | Avstand fra midten i sensorens posisjonsskala, ikke millimeter. |
-| `peak` | Høyeste sensorverdi. |
-| `valid` | Sensoranalysen fant en brukbar linjekandidat. |
-| `strong` | Kandidaten har tilstrekkelig sterk toppverdi. |
-| `quality` | En bokstav som forklarer typen måling. |
+Opprett Python-miljø og installer seriell støtte:
 
-En svak kandidat kan bare brukes kortvarig under vanlig følging, når den ligger nær en nylig sterk måling. Den kan ikke bekrefte at en mistet linje er funnet igjen. Derfor kan en kandidat ha `valid = true` i sensoranalysen og likevel bli avvist inne i styringen.
-
-### 2. Følge linjen
-
-`LineController` husker blant annet forrige feil, motorpådrag og hvilken side linjen sist ble sett på. `update()` velger handling ut fra den nye målingen og dette minnet.
-
-Vanlig følging bruker PD-regulering:
-
-- **P-leddet** styrer ut fra hvor langt linjen er fra midten: `KP * error`.
-- **D-leddet** reagerer på hvor raskt feilen endrer seg. Det filtreres og begrenses for å redusere støy og brå utslag.
-
-Forenklet beregnes motorene slik:
-
-```text
-venstre = grunnfart + svingkorreksjon
-høyre   = grunnfart - svingkorreksjon
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe hardware_testbed.py --list-ports
 ```
 
-En linje til høyre gir dermed mer pådrag på venstre hjul og mindre på høyre. Roboten svinger mot linjen. Ved store avvik legges ekstra svingstyrke til.
+Et miljø med pyserial er allerede opprettet på denne maskinen. USB-porten nedenfor er et eksempel og må byttes til Uno sin port:
 
-Grunnfarten går mot `CORNER_SPEED` når følgingen er ustabil, og får øke mot `BASE_SPEED` etter en sammenhengende stabil periode. Pådragene endres gradvis gjennom ramper. Hvis et hjulmål overstiger `MOTOR_LIMIT`, skaleres begge mål ned med samme forhold.
-
-Under vanlig følging får hjulene bare mål fremover eller null. Under søking og innretting kan hjulene gå i motsatt retning slik at roboten roterer på stedet.
-
-### 3. Når linjen forsvinner
-
-Ved en kort glipp senkes pådraget. Hvis tapet varer minst `LOSS_CONFIRM_MS`, går styringen over i søk, også kalt recovery.
-
-Roboten søker mot siden der linjen sist ble sett, hvis dette minnet er ferskt. Uten et ferskt hint bremser den først og søker deretter i standardretningen, som nå er høyre. Søket bytter ikke side bare fordi det har gått en bestemt tid.
-
-Når en sterk linje dukker opp, begynner roboten å rette seg inn med en gang. Den går tilbake til vanlig følging først når treffet er bekreftet, linjen er nær nok midten, posisjonen endrer seg sakte nok og motorpådragene passer for overgangen.
-
-### 4. Når sensorene gir et uklart mønster
-
-Et bredt felt, lite kontrast eller flere konkurrerende linjegrupper behandles som tvetydig informasjon. Dette er en annen situasjon enn at linjen bare er borte.
-
-Med et ferskt retningsgrunnlag kan roboten kort fortsette med samme forhold mellom hjulene for å komme ut av området. Deretter bremses hjulene mot null. Ved vedvarende tvetydighet stopper den etter `AMBIGUOUS_TIMEOUT_MS`, nå 500 ms. Koden har ingen egen ruteplan for veikryss.
-
-## Oppkobling som koden forventer
-
-| Funksjon | Arduino-pinne |
-| --- | --- |
-| Høyre motor: AIN1 / AIN2 / PWMA | D11 / D12 / D6 |
-| Venstre motor: BIN1 / BIN2 / PWMB | D8 / D9 / D10 |
-| START | D7 |
-| CALIBRATE | D3 |
-
-Knappene bruker `INPUT_PULLUP` og regnes som trykket når inngangen er LOW. Dette tilsvarer knapper mellom inngang og GND.
-
-Sensorpinnene står ikke i `conf.h`: `reflectanceSensor.init()` bruker standardene i det installerte Zumo-biblioteket. For ATmega328P/168 er sensorrekkefølgen D4, A3, D11, A0, A2, D5, med emitterstyring på D2. Kontroller dette mot faktisk sensormodell og kabling før dere bygger videre.
-
-Motor A er høyre motor, og motor B er venstre. Positive verdier er ment som fremover, negative som bakover og null som stoppkommando. PWM er pådrag, ikke målt hjulhastighet. Koden har ingen tilbakemelding fra hjulenkodere.
-
-## Bygging og opplasting
-
-Prosjektet bruker PlatformIO med Arduino-rammeverket og Pololus Zumo-sensorbibliotek. Åpne prosjektmappen i CLion med eksisterende PlatformIO-oppsett, eller bruk PlatformIO fra terminalen.
-
-**Avklar kortvalget først:** `platformio.ini` inneholder nå `[env:uno]` og `board = uno`, selv om roboten deres bruker Nano. Miljønavnet er bare et navn; kortvalget må passe den faktiske Nano-varianten og bootloaderen for bygging og opplasting.
-
-Når kortoppsettet er avklart:
-
-```text
-pio run
-pio run --target upload
-pio device monitor --baud 115200
+```powershell
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test info
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test timing --seconds 5
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sensors --seconds 5 --label "lyst gulv, motor av"
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test calibrate --seconds 5
 ```
 
-## Lese diagnose fra serieporten
+Under kalibrering føres alle lesere manuelt over både underlag og linje. Motorene står stille. Rå min/maks oppdateres fra én avlesning per kontrollrunde, og kalibrerte verdier beregnes fra samme råprøve. Dette erstatter det gamle bibliotekets blokkerende flermålingskalibrering. Kalibreringen ligger bare i RAM og må gjøres etter Nano-omstart.
 
-Serieporten bruker 115200 baud. Under kjøring forsøker koden å skrive en linje omtrent hvert 60. ms. Vanlige utskrifter kan hoppes over hvis sendebufferen er full.
+Motorforsøk krever konfigurert maskinvare, `MotorsEnabled = true`, og et eksplisitt flagg i PC-programmet:
 
-Eksempel på formatet, med oppdiktede verdier:
-
-```text
-100,180,850,900,200,100 e45 VT q0 185/180
+```powershell
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test motor --left 60 --right 0 --seconds 2 --confirm-motion
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sweep --side left --start 0 --end 100 --step 5 --dwell-ms 500 --confirm-motion
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sweep --side left --start 100 --end 0 --step -5 --dwell-ms 500 --confirm-motion
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test follow --seconds 10 --confirm-motion
 ```
 
-- De seks første tallene er sensorverdiene i rekkefølge.
-- `e45` betyr feil +45. `e?` betyr at sensoranalysen ikke har en gyldig posisjon.
-- `VT` består av to bokstaver: først målekvalitet, så styringsmodus.
-- `q0` er lagret søkeretning: −1 venstre, +1 høyre, 0 ikke valgt ennå. Den er ikke nødvendigvis aktiv utenfor søk.
-- `185/180` er venstre/høyre motorpådrag.
+Standardgrensen for måleforsøk er PWM ±120 og maksimalt 30 sekunder. Grensene gjelder testkommandoene. Vanlig linjefølging bruker egne hastighetsgrenser i regulatoren, men har samme tidsgrense, lease og feilovervåking. Direkte motorforsøk bruker pådraget uten regulatorens myke PWM-rampe, slik at en virkelig stegrespons kan måles.
 
-| Målekvalitet | Betydning |
+CSV og en JSON-fil med testbetingelser/resultatstatus lagres i `runs/`. `--csv` og `--label` kan brukes til egen fil og beskrivelse. Ctrl+C eller en feil forsøker å sende STOP i `finally`. Ved brutt PC-forbindelse utløper Uno sin hostlease og deretter Nano sin motorlease. Dette er ikke en elektrisk nødstopp.
+
+## Hva kan måles automatisk nå?
+
+| Måling | Krever |
 | --- | --- |
-| `V` | Sterk, brukbar linje. |
-| `L` | Svak linjekandidat. |
-| `?` | Ingen brukbar kandidat, for eksempel for svakt signal. |
-| `F` | For liten kontrast mellom sensorene. |
-| `B` | Den valgte gruppen er for bred. |
-| `X` | Ingen tilstrekkelig dominerende gruppe. |
+| Rå og kalibrerte sensorverdier | Fungerende og konfigurert sensorbackend. |
+| Kontroll- og avlesningstider | Nano-firmware. Timing uten konfigurert sensor måler ikke avlesning av den virkelige sensoren. |
+| Faktisk pådrag og testtrinn | Motorpinner/driver konfigurert. Pådrag er ikke målt kraft. |
+| Spenning og strøm | Egne målekretser på konfigurerte ADC-innganger, med korrekt skala/nullpunkt. |
+| Hjul-RPM | Enkoder og pulser per hjulomdreining. Første versjon bruker enkeltkanals pulser og rapporterer bare RPM-magnitude. |
+| Kraft, moment, chassisfart og faktisk akselerasjon | Separat måleutstyr/video. Ingen av disse beregnes som om de var målt fra PWM alene. |
 
-Kommentaren i `main.cpp` nevner `W` for svakt signal, men implementasjonen returnerer nå `?` i dette tilfellet.
+Manglende spenning/strøm/enkoder gir `null` i telemetri og tomme felt i CSV. Reelle nullverdier beholdes som null. En PWM-sveip kjører automatisk, men start-/gangterskler må etterpå vurderes mot RPM eller video. Programmet påstår ikke at det har funnet en terskel uten bevegelsesmåling.
 
-| Styringsmodus | Betydning |
-| --- | --- |
-| `T` | Vanlig linjefølging. |
-| `G` | Kort glipp før bekreftet linjetap. |
-| `U` | Tvetydig sensorinformasjon. |
-| `B` | Nedbremsing før blindt søk. |
-| `R` | Søker etter linjen. |
-| `A` | Linjen er sett igjen, og roboten retter seg inn. |
-| `C` | Kandidat uten aktiv innretting; definert i `mode()`, men ser ikke ut til å brukes i dagens kjørevei. |
-| `S` | Styringen har stoppet, for eksempel ved tidsfrist. |
+PC-opptakene er **nedprøvd telemetri**, ikke hver eneste 8-ms-runde. Hver rad har Nano-tidsstempel og sekvensnummer; hull mellom PC-prøver rapporteres. Min/maks kontrolltid og tidsfristtellere oppdateres på Nano for alle runder. Det finnes ennå ingen fullhastighets rådatabuffer. Høyfrekvent sensorstøy og raske transienter krever en senere opptaksmodus eller eksternt måleutstyr.
 
-Stopp med knappen avslutter kjøreløkken direkte og gir ikke nødvendigvis en utskrift med `S`.
+`encoder_age_ms` viser alder siden siste RPM-oppdatering. RPM-feltene er tomme frem til første enkodervindu er ferdig. `quality` og `control_mode` viser henholdsvis sensoranalysens kvalitet og regulatorens kjøremåte. Eksisterende CSV-/JSON-opptak overskrives ikke.
 
-## Justere og videreutvikle
+## Tidsmodell og kommunikasjon
 
-Endre én ting om gangen, og prøv på samme bane mellom endringene. Skriv ned verdien før og etter, og hva roboten gjorde.
+Nano prioriterer kontrollsløyfen. Neste planlagte tidspunkt følger en fast tidsakse; ved forsinkelse telles hoppede perioder i stedet for at flere gamle runder kjøres rett etter hverandre. Kommando- og snapshotarbeid kjøres i ledig tid. I²C-avbruddene kopierer bare kommandoer/ferdige sider og validerer faste pakker; de kjører ikke sensor eller regulator.
 
-| Det dere vil endre | Begynn med |
-| --- | --- |
-| Fart på rettstrekk og i sving | `BASE_SPEED`, `CORNER_SPEED` i `conf.h`. Nå 200 og 180. |
-| Hvor hardt den styrer mot linjen | `KP`, og ved store avvik `EXTRA_TURN_GAIN`. |
-| Pendling rundt linjen | Undersøk sensorverdiene, deretter `KP`, `KD` og `D_FILTER_SECONDS`. |
-| Brå motorendringer | `MOTOR_ACCEL`, `MOTOR_DECEL` og grunnfartens ramper. |
-| Feilaktig linjetap | Kalibrering først, deretter signal- og kontrastgrenser i `conf.h`. |
-| Blind søkerotasjon | `SEARCH_SPEED` og `RECOVERY_SEARCH_LIMIT`. |
-| Innretting etter gjenfunn | `recovery_conf.h` og `capture_conf.h`. |
-| Oppførsel over brede eller uklare felt | `ambiguous_conf.h` og `AMBIGUOUS_TIMEOUT_MS`. |
+`cycle_us` omfatter sensor, regulering, motorutgang og valgfri ADC-/enkoderoppdatering. Snapshotarbeid utenfor kontrollrunden fanges gjennom startforsinkelse og hoppede perioder. `MaxCycleUs` er en kontrollert grense etter at arbeidet returnerer; den kan ikke avbryte en fastlåst driver midt i et kall. Watchdog er et separat vern mot dette.
 
-Kommentarene ved konstantene forklarer mer om virkningen av høyere og lavere verdier.
+`time_us` er kontrollrundens start på Nano, ikke PC-ankomsttid. Telleren går rundt etter ca. 71,6 minutter. Differanser håndteres usignert, og PC-programmet pakker ut tiden over omløpet. Regulatoren bruker `millis()` separat, slik at micros-omløp ikke blir et kunstig stort D-tidssteg.
 
-Før en endring prøves i fart:
+Uno er I²C-controller, og Nano svarer på adressen `NanoAddress`. Nano bruker de faste I²C-pinnene på klassisk Uno/Nano, A4/A5, med felles GND og korrekt pullup-oppsett. Flytting av disse maskinvarepinnene krever annet grensesnitt/kort, ikke bare et nytt tall i konfigurasjonen. Eksakt øvrig kabling kommer senere.
 
-1. Kontroller med hjulene løftet at begge motorer går fremover ved positiv kommando.
-2. Kontroller at en linje til venstre gir negativ feil, og en linje til høyre positiv feil. Rett opp sensorrekkefølge eller `SENSOR_DIRECTION` hvis testen viser motsatt fortegn.
-3. Test start, slipp av START og nytt trykk for stopp.
-4. Test rett linje, svinger, mistet linje, gjenfunn og et bredt felt ved lavere fart.
-5. Bygg prosjektet og noter testresultatet sammen med endringen.
+## Tester
 
-Når dere legger til funksjoner, behold samme arbeidsdeling: maskinvare og knapper i `main.cpp`, sensoranalyse og kjøreatferd i `linefollow.cpp`, motorutganger i `motor.cpp` og justerbare verdier i konfigurasjonsfilene.
+```powershell
+.\.venv\Scripts\python.exe tools/run_tests.py
+```
+
+Testene dekker CRC/snapshotpakker, tidsplanlegger og uint32-omløp, PWM-sveip, regulator, faktisk Nano-programflyt med falsk maskinvare, feilstopper, kalibrering og Python-logging. Testene trenger ikke Arduino tilkoblet. De bekrefter programlogikk og bygging, ikke virkelig sensorrespons, elektrisk kobling eller garantert kjøretid på roboten.
+
+## Filene
+
+- `src/nano.cpp`: kontrollsløyfe, testmodi, tidsmålinger og Nano sin I²C-side.
+- `src/uno.cpp`: PC-kommandoer, heartbeat og sammensetting av I²C-snapshot.
+- `src/hardware.cpp`: QTR-avlesning, pinnekontroll, motorutgang og valgfritt måleutstyr.
+- `src/custom_sensor.cpp`: avgrenset sted for den nye sensorens grensesnitt.
+- `src/control/`: gjenbrukt regulatorlogikk og ramper.
+- `include/board_config.h`: maskinvare og tidsgrenser.
+- `include/protocol.h`: felles byteformat og CRC.
+- `hardware_testbed.py`: PC-programmet for fysiske måleforsøk.

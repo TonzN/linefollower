@@ -46,6 +46,6 @@ struct LineController
     void brake(float dt);
 };
 
-LineReading analyzeLine(const unsigned int *values);
+LineReading analyzeLine(const uint16_t *values);
 
 #endif

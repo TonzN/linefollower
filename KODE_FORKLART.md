@@ -1,5 +1,7 @@
 # Kode forklart – linjefølgeren
 
+> Historisk veiledning for programmet før delingen mellom Uno og Nano. Filstier og oppstartsflyt nedenfor beskriver den tidligere versjonen. Se `README.md` for den nye arkitekturen; regulatoren er i hovedsak videreført under `src/control/` og `include/control/`.
+
 Denne veiledningen er for deg som skal lese og endre koden, også hvis deler av den ble laget uten at du fikk forklart hvordan de virker. Du trenger ikke forstå alle formlene med en gang. Begynn med programflyten, og bruk resten som oppslagsverk.
 
 Forklaringen bygger på kildekoden i `C:\Users\tonzg\CLionProjects\LinjeFølger1`, lest 22. oktober 2026. Kodeutdrag merket som forenklet viser prinsippet; de erstatter ikke den faktiske koden. Fysisk oppførsel må testes på roboten. Når et mulig formål forklares, er dette en tolkning av koden, ikke en bekreftet forklaring fra den opprinnelige utvikleren.

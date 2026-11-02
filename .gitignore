@@ -1,3 +1,9 @@
-.pio
-.idea_bakcup
-logs
+.pio/
+.idea/
+.idea_bakcup/
+.venv/
+__pycache__/
+*.pyc
+runs/
+build/
+*.exe
