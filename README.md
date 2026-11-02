@@ -120,7 +120,7 @@ Med et ferskt retningsgrunnlag kan roboten kort fortsette med samme forhold mell
 
 | Funksjon | Arduino-pinne |
 | --- | --- |
-| Høyre motor: AIN1 / AIN2 / PWMA | D13 / D12 / D6 |
+| Høyre motor: AIN1 / AIN2 / PWMA | D11 / D12 / D6 |
 | Venstre motor: BIN1 / BIN2 / PWMB | D8 / D9 / D10 |
 | START | D7 |
 | CALIBRATE | D3 |
