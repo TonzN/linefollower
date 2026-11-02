@@ -2,6 +2,8 @@
 
 Seks direkte midtlesere på en hoved-Nano, og en andre Nano for valgte ytterlesere. PC kobles med USB til **hovedkortet**.
 
+Start med [robotoversikten](docs/LINJEFOLGEREN.md), deretter [kode forklart](KODE_FORKLART.md). Gruppen følger en fast [kodestil](docs/KODESTIL.md). [Protokollen](docs/PROTOKOLL.md) og [minnegjennomgangen](docs/MINNEBRUK.md) beskriver kommunikasjon og ressursbruk.
+
 ```text
 PC -- USB --> hoved-Nano --> motorer
                  |  |
@@ -82,7 +84,17 @@ PC-opptak er nedprøvde og inneholder ikke alle kontrollrunder eller sideskann. 
 
 Miljøer med suffikset `_new_bootloader` finnes for begge Nanoer. Velg korrekt variant før opplasting.
 
-Bygg også med den faktiske sensor-/motorprofilen aktivert. Ukonfigurerte verdier kan få kompilatoren til å fjerne kode. En byggekontroll med seks analoge midtlesere, motorutganger, ytterkommunikasjon og 19 multipleksede ytterlesere ga hovedkortet 1450 byte statisk RAM / 29292 byte flash, og ytterkortet 495 / 3924 byte. Stack og virkelig kjøretid må fortsatt måles. Prøvetildelingene er ikke lagret som robotens pinner.
+Bygg også med den faktiske sensor-/motorprofilen aktivert. Ukonfigurerte verdier kan få kompilatoren til å fjerne kode. Den aktive prøveprofilen bruker nå 1342 byte statisk RAM / 25364 byte flash på hovedkortet, mot tidligere 1450 / 29292. Ytterkortet bruker 495 / 3924. Se [minnegjennomgangen](docs/MINNEBRUK.md) for metode og begrensninger. Stack og virkelig kjøretid må fortsatt måles; prøvepinnene er ikke lagret som robotens kabling.
+
+Målerapporter sendes nå som S2-data, og `telemetry.py` lager feltnavn og lesbar JSON på PC. Python-testbenken og hovedfirmwaren må oppdateres sammen. Den eldre Uno-bridgens JSON-format støttes fortsatt.
+
+For formatering og stilkontroll:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe tools/format_code.py
+.\.venv\Scripts\python.exe tools/format_code.py --check
+```
 
 ## Hardware-testbenk
 
@@ -99,15 +111,17 @@ Start med sensoropptak og timing. Noter høyde, underlag, lys og forsyning manue
 
 ## Filkart og gjenbruk
 
-- `src/master.cpp`: USB-kommandoer, oppdelt JSON-sending og koordinering.
-- `src/nano.cpp`: felles kontroll-runtime, også brukt av eldre oppsett.
+- `src/master.cpp`: USB-kommandoer, oppdelt S2-sending og koordinering.
+- `src/control_runtime.cpp`: felles kontroll-runtime med grensesnitt i `include/control_runtime.h`.
+- `src/nano.cpp`: lite inngangspunkt for eldre Nano/Uno-oppsett.
 - `src/side_nano.cpp`: analog avlesning og komplette, frosne sideskann.
 - `src/side_link.cpp`: henting, validering og målealder på hovedkortet.
 - `src/hardware.cpp`: lokale sensorer, motorer og valgfritt måleutstyr.
 - `include/side_protocol.h`: byteformat for sidemålinger.
 - `src/control/`: gjenbrukt PD, recovery og ramper.
 - `hardware_testbed.py`: PC-programmet og CSV-/JSON-opptak.
+- `telemetry.py`: tolkning og validering av S2-målerapporter på PC.
 
 `LINE_MAX_WIDTH` er foreløpig økt fra tre til fem sterke kjernelesere ut fra observasjonen om linjebredde. Andre regulatorverdier er ikke retunet.
 
-De eldre miljøene `nano`, `nano_new_bootloader` og `uno` er beholdt for Uno-bridgen. De bruker ikke ytterkoblingen. `KODE_FORKLART.md` er historisk forklaring fra før todelingen. Git-historikk og tidligere 3D-modeller er bevart.
+De eldre miljøene `nano`, `nano_new_bootloader` og `uno` er beholdt for Uno-bridgen. De bruker ikke ytterkoblingen. Den gamle kodeforklaringen er bevart under `docs/historikk/`; `KODE_FORKLART.md` beskriver nå dagens kode. Git-historikk og tidligere 3D-modeller er bevart.
