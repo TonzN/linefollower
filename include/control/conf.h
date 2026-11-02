@@ -63,8 +63,8 @@ const uint16_t SENSOR_FLOOR = 500;
 // Minste forskjell mellom høyeste/laveste sensor. Høyere krever tydeligere kontrast mot underlaget.
 const uint16_t LINE_MIN_CONTRAST = 300;
 // Maks antall sterke sensorer i valgt gruppe. Høyere godtar bredere linjer/felt.
-// Foreløpig tilpasset observasjonen om 4–5 lesere over linjen på ny sensor.
-// Dette er antall sterke kjernelesere; må verifiseres etter kalibrering.
+// Foreløpig tilpasset 4–5 fysiske leserposisjoner over linjen på ny sensor.
+// Bredden måles i den opprinnelige rekken, også når noen utganger ikke brukes.
 const uint8_t LINE_MAX_WIDTH = 5;
 // Prosent av største bakgrunnskorrigerte utslag som regnes som sterkt. Høyere ignorerer flere svake
 // sideutslag.

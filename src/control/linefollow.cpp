@@ -105,7 +105,8 @@ LineReading analyzeLine(const uint16_t* values)
         result.quality = 'X';
         return result;
     }
-    if (bestEnd - bestStart + 1 > LINE_MAX_WIDTH)
+    if (cfg::SensorInputs[bestEnd].physicalIndex - cfg::SensorInputs[bestStart].physicalIndex + 1 >
+        LINE_MAX_WIDTH)
     {
         result.quality = 'B';
         return result;
@@ -129,9 +130,8 @@ LineReading analyzeLine(const uint16_t* values)
     {
         uint16_t weight = values[i] > POSITION_FLOOR ? values[i] - POSITION_FLOOR : 0;
         total += weight;
-        // Fast skala over hele rekken, uavhengig av antall lesere. 32-bit for AVR.
-        weightedError +=
-            (int32_t)weight * ((int32_t)i * cfg::SensorPositionSpan / (SensorCount - 1) - CENTER);
+        // Bruk fysisk indeks: utvalgte lesere kan ha forskjellig avstand.
+        weightedError += (int32_t)weight * (cfg::sensorPosition(i) - CENTER);
     }
     result.error = SENSOR_DIRECTION * (int)(weightedError / total);
     result.strong = result.peak >= LINE_MIN_PEAK;

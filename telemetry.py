@@ -1,7 +1,7 @@
-"""Decode Nano telemetry on the PC, where memory is plentiful.
+"""Decode ESP32 telemetry on the PC, where memory is plentiful.
 
-The Nano sends an S2 line: hexadecimal bytes followed by CRC8. It does not
-store JSON field names or use printf to format every measurement.
+The ESP32 sends S3 lines: hexadecimal bytes with CRC8 and physical sensor
+indices. Legacy S2 recordings from the Nano version remain readable.
 """
 
 from __future__ import annotations
@@ -66,6 +66,9 @@ def decode_sample(line: bytes) -> dict:
     Raises ValueError on corruption, truncation or inconsistent channel counts.
     Missing measurements become None; a measured zero remains zero.
     """
+    if line.startswith(b"S3:"):
+        return decode_esp32_sample(line)
+
     if not line.startswith(b"S2:") or not line.endswith(b"\n"):
         raise ValueError("Ufullstendig S2-rapport")
 
@@ -143,5 +146,60 @@ def decode_sample(line: bytes) -> dict:
     )
     sample["side_indices"] = list(packet[indices_offset : indices_offset + side_count])
     sample["main_indices"] = list(packet[indices_offset + side_count : -1])
+
+    return sample
+
+
+def decode_esp32_sample(line: bytes) -> dict:
+    """S3: one local sensor array; no side controller or I2C fields."""
+    if not line.endswith(b"\n"):
+        raise ValueError("Ufullstendig S3-rapport")
+
+    packet = bytes.fromhex(line[3:].decode("ascii"))
+    if not packet or not 2 <= packet[0] <= 31:
+        raise ValueError("Ugyldig sensorantall i S3-rapport")
+
+    count = packet[0]
+    if len(packet) != 66 + 5 * count or crc8(packet[:-1]) != packet[-1]:
+        raise ValueError("Feil lengde eller CRC i S3-rapport")
+
+    snapshot = packet[1 : 1 + 64 + 4 * count]
+    sample = {"kind": "sample"}
+
+    for name, offset, format_code in HEADER_FIELDS:
+        sample[name] = struct.unpack_from("<" + format_code, snapshot, offset)[0]
+
+    if sample["sensor_count"] != count:
+        raise ValueError("Ulike sensorantall i S3-rapport")
+
+    sample["quality"] = chr(snapshot[47])
+    sample["control_mode"] = chr(snapshot[51])
+    flags = sample["flags"]
+    raw_valid = bool(flags & 1024)
+    calibrated_valid = raw_valid and bool(flags & 2)
+
+    if not calibrated_valid or sample["quality"] not in ("V", "L"):
+        sample["error"] = None
+
+    for name, bit in (
+        ("voltage_mv", 16),
+        ("current_ma", 32),
+        ("left_rpm_x10", 64),
+        ("right_rpm_x10", 128),
+    ):
+        if not flags & bit:
+            sample[name] = None
+
+    raw = list(struct.unpack_from(f"<{count}H", snapshot, 64))
+    calibrated = list(struct.unpack_from(f"<{count}H", snapshot, 64 + 2 * count))
+    sample["raw"] = raw if raw_valid else [None] * count
+    sample["calibrated"] = calibrated if calibrated_valid else [None] * count
+    sample["sensor_indices"] = list(packet[1 + len(snapshot) : -1])
+
+    if any(
+        left >= right
+        for left, right in zip(sample["sensor_indices"], sample["sensor_indices"][1:])
+    ):
+        raise ValueError("Sensorindeksene er ikke sortert")
 
     return sample

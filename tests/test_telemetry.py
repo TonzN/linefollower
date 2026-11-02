@@ -27,6 +27,30 @@ def line_from_packet(data):
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_s3_single_array_12_bit_and_nonuniform_positions(self):
+        count = 12
+        snapshot = bytearray(64 + 4 * count)
+        struct.pack_into("<H", snapshot, 42, 1024)
+        struct.pack_into("<H", snapshot, 58, 4095)
+        struct.pack_into("<H", snapshot, 64, 4095)
+        snapshot[46] = count
+        snapshot[47] = ord("?")
+        snapshot[51] = ord("T")
+        indices = bytes([0, 3, 6, 9, 10, 11, 12, 13, 14, 17, 21, 24])
+        body = bytes([count]) + snapshot + indices
+        packet_bytes = body + bytes([crc8(body)])
+        line = b"S3:" + packet_bytes.hex().encode() + b"\n"
+        sample = decode_sample(line)
+        self.assertEqual(sample["raw"][0], 4095)
+        self.assertEqual(sample["raw_maximum"], 4095)
+        self.assertEqual(sample["sensor_indices"], list(indices))
+        self.assertNotIn("side_count", sample)
+        for index in range(len(packet_bytes)):
+            damaged = bytearray(packet_bytes)
+            damaged[index] ^= 1
+            with self.assertRaises(ValueError):
+                decode_sample(b"S3:" + damaged.hex().encode() + b"\n")
+
     def test_crc_reference_vector(self):
         self.assertEqual(crc8(b"123456789"), 0xF4)
 

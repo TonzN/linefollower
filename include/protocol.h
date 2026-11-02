@@ -12,9 +12,6 @@ namespace proto
     constexpr uint8_t PayloadSize = 25;
     constexpr uint8_t SensorCapacity = 31;
     constexpr uint8_t HeaderSize = 64;
-    constexpr uint8_t PageData = 24;
-    constexpr uint16_t SnapshotSize = HeaderSize + 4 * SensorCapacity;
-    constexpr uint8_t PageCount = (SnapshotSize + PageData - 1) / PageData;
     enum class Command : uint8_t
     {
         SelectPage = 0,
@@ -46,7 +43,9 @@ namespace proto
         CycleBudget = 1,
         LateStart = 2,
         LinkLost = 3,
-        SensorRead = 4
+        SensorRead = 4,
+        Configuration = 5,
+        Watchdog = 6
     };
     enum class Result : uint8_t
     {
@@ -142,22 +141,4 @@ namespace proto
         return x > 65535 ? 65535 : uint16_t(x);
     }
 
-    // Alle sider i én avlesning må ha samme Latch-sekvensnummer.
-    inline void
-    makePages(const uint8_t* snapshot, uint16_t sequence, uint8_t pages[PageCount][FrameSize])
-    {
-        for (uint8_t page = 0; page < PageCount; page++)
-        {
-            uint8_t data[PayloadSize] = {page};
-            for (uint8_t i = 0; i < PageData; i++)
-            {
-                uint16_t offset = uint16_t(page) * PageData + i;
-                if (offset < SnapshotSize)
-                {
-                    data[1 + i] = snapshot[offset];
-                }
-            }
-            frame(pages[page], Command::Latch, sequence, data, PayloadSize);
-        }
-    }
 } // namespace proto

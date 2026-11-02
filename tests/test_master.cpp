@@ -1,10 +1,7 @@
 #include <iostream>
 #include "Arduino.h"
-#include "Wire.h"
 #include "hardware.h"
-#include "side_link.h"
 uint32_t fakeMicros = 0;
-FakeWire Wire;
 FakeSerial Serial;
 
 namespace hw
@@ -63,32 +60,6 @@ namespace hw
     }
 } // namespace hw
 
-namespace side_link
-{
-    sideproto::Sample value;
-    bool isFresh = false;
-
-    void service(uint32_t)
-    {
-    }
-
-    const sideproto::Sample& latest()
-    {
-        return value;
-    }
-
-    uint16_t ageMs(uint32_t)
-    {
-        return isFresh ? 4 : 65535;
-    }
-
-    bool fresh(uint32_t)
-    {
-        return isFresh;
-    }
-} // namespace side_link
-
-#define LINEFOLLOW_MASTER
 #include "../src/control_runtime.cpp"
 #include "../src/master.cpp"
 using namespace control_runtime;
@@ -122,10 +93,9 @@ int main()
     std::cout << Serial.outgoing;
     assert(Serial.outgoing.back() == '\n');
     Serial.outgoing.clear();
-    side_link::isFresh = true;
-    side_link::value.valid = true;
-    side_link::value.raw[0] = 0;
-    side_link::value.raw[1] = 950;
+    sampleValid = true;
+    raw[0] = 0;
+    raw[1] = 950;
     dispatch("POLL");
     // STOP må virke selv om en stor rapport fortsatt venter på UART-plass.
     armed = true;
@@ -140,5 +110,6 @@ int main()
     dispatch("MOTOR rubbish");
     drain();
     assert(Serial.outgoing.find("error") != std::string::npos);
-    std::cout << "Master: nonblocking UART, unsigned micros, side telemetry and priority STOP OK\n";
+    std::cout << "Master: nonblocking UART, unsigned micros, single-array S3 telemetry and "
+                 "priority STOP OK\n";
 }

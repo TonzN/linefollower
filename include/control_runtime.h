@@ -3,7 +3,7 @@
 #include "board_config.h"
 #include "protocol.h"
 
-// Felles kontrollprogram for ny hoved-Nano og eldre Nano med Uno-bridge.
+// Kontrollprogram for én ESP32.
 // Transportlaget bruker dette grensesnittet, ikke regulatorens interne variabler.
 namespace control_runtime
 {
@@ -29,8 +29,6 @@ namespace control_runtime
     // Egen prioritert stoppkanal: overstyrer en vanlig kommando som venter.
     void requestStop(uint16_t sequence);
 
-#if defined(LINEFOLLOW_MASTER)
     // Frys målebildet. Pekeren er gyldig frem til neste captureSnapshot().
     const uint8_t* captureSnapshot();
-#endif
 } // namespace control_runtime

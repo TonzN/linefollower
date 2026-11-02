@@ -1,11 +1,9 @@
 #include <cassert>
 #include <iostream>
 #include "Arduino.h"
-#include "Wire.h"
 #include "hardware.h"
 #include "protocol.h"
 uint32_t fakeMicros = 0;
-FakeWire Wire;
 
 namespace fake
 {
@@ -73,9 +71,8 @@ namespace hw
     }
 } // namespace hw
 
-// Inkluder den faktiske Nano-runtime, ikke en ny implementasjon av den.
+// Test den faktiske ESP32-kontrollflyten med falsk maskinvare.
 #include "../src/control_runtime.cpp"
-#include "../src/nano.cpp"
 using namespace control_runtime;
 
 void reset()
@@ -100,7 +97,7 @@ void reset()
     memset(calibrated, 0, sizeof(calibrated));
     memset(calibrationMin, 0, sizeof(calibrationMin));
     memset(calibrationMax, 0, sizeof(calibrationMax));
-    setup();
+    control_runtime::begin();
 }
 
 Result invoke(Command op, const uint8_t* p = nullptr, uint8_t size = 0)
@@ -154,32 +151,29 @@ int main()
     reset();
     invoke(Command::Arm);
     motor(20, 20);
-    fakeMicros = (cfg::NanoLeaseMs + 1) * 1000;
-    loop();
+    fakeMicros = (cfg::HostLeaseMs + 1) * 1000;
+    control_runtime::tick();
     assert(fault == Fault::LinkLost && !armed && hw::appliedLeft == 0);
     reset();
     invoke(Command::Arm);
     motor(20, 20);
     cycle(0);
-    uint8_t packet[32];
-    proto::frame(packet, Command::Stop, 99);
-    Wire.deliver(packet, 32);
-    loop();
+    control_runtime::requestStop(99);
+    control_runtime::tick();
     assert(mode == Mode::Idle && !armed && hw::appliedLeft == 0 && lastSequence == 99);
     reset();
     mode = Mode::Sensors;
     testDuration = 1000;
     cycle(0);
     publish(70);
-    uint16_t saved =
-        proto::get16(pages[2] + 7 + 16); // cache er stabil også etter ny kontrollrunde.
+    uint8_t saved[sizeof(masterSnapshot)];
+    memcpy(saved, masterSnapshot, sizeof(saved));
     fake::value = 900;
     fakeMicros = 8000;
     cycle(8000);
-    assert(proto::get16(pages[0] + 3) == 70);
-    assert(proto::get16(pages[2] + 7 + 16) == saved);
+    assert(memcmp(saved, masterSnapshot, sizeof(saved)) == 0);
     publish(71);
-    assert(proto::get16(pages[0] + 3) == 71);
+    assert(proto::get16(masterSnapshot + 64) == 900);
     reset();
     uint8_t duration[4];
     proto::put32(duration, 16);
@@ -199,9 +193,16 @@ int main()
     cycle(8000);
     assert(complete && !calibratedOk);
     reset();
+    platform_runtime::watchdogOk = false;
+    control_runtime::begin();
+    assert(fault == Fault::Watchdog);
+    invoke(Command::Clear);
+    assert(invoke(Command::Arm) == Result::NotConfigured);
+    platform_runtime::watchdogOk = true;
+    reset();
     uint8_t invalid[32] = {};
-    Wire.deliver(invalid, 32);
-    assert(!pending);
-    std::cout << "Actual Nano runtime: motor gate, reverse bounds, deadlines, link lease, priority "
-                 "STOP, snapshot cache, calibration OK\n";
+    assert(!enqueueCommand(Command::Sensors, 1, invalid, 26));
+    std::cout
+        << "Actual ESP32 runtime: motor gate, reverse bounds, deadlines, link lease, priority "
+           "STOP, snapshot cache, calibration OK\n";
 }

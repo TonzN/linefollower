@@ -1,127 +1,68 @@
-# Linjefølger 2
+# Linjefølger – ESP32-S / NodeMCU-32S
 
-Seks direkte midtlesere på en hoved-Nano, og en andre Nano for valgte ytterlesere. PC kobles med USB til **hovedkortet**.
+Én ESP32, uten I2C eller slavekort. Standardoppsettet har **12 valgte analoge lesere**, med støtte for valgfri analog multiplekser på samme kort.
 
-Start med [robotoversikten](docs/LINJEFOLGEREN.md), deretter [kode forklart](KODE_FORKLART.md). Gruppen følger en fast [kodestil](docs/KODESTIL.md). [Protokollen](docs/PROTOKOLL.md) og [minnegjennomgangen](docs/MINNEBRUK.md) beskriver kommunikasjon og ressursbruk.
+- [Robot og pinnevalg](docs/LINJEFOLGEREN.md)
+- [Kode forklart](KODE_FORKLART.md)
+- [Kodestil](docs/KODESTIL.md)
+- [Protokoll](docs/PROTOKOLL.md)
+- [Minnebruk](docs/MINNEBRUK.md)
 
-```text
-PC -- USB --> hoved-Nano --> motorer
-                 |  |
-     6 midtlesere | I2C
-                    |
-                ytter-Nano
-                    |
-       direkte analog / multipleksere
-                    |
-              valgte ytterlesere
-```
+## Hvorfor tolv?
 
-## Status
+Brikken har 18 ADC-kanaler, men NodeMCU-32S-profilen har normalt 16 ført ut. GPIO37/38 er ikke kortpinner i denne profilen. Fire tilgjengelige ADC-pinner påvirker oppstarten og blokkeres som standard: GPIO0, 2, 12 og 15.
 
-- Gruppen observerer omtrent **to lesere over linjen på gammel sensor**, mot **4–5 på ny**. Dette er foreløpige observasjoner, ikke mål i mm eller dokumentert presisjon.
-- `0J11785` peker mot QTRX-HD-25, men oppgitt `irs47j` avviker fra produsentens `irs45j`. **Bekreft modell og A/RC-utgave før kabling.** PCB-merkingen skiller ikke alene A fra RC.
-- Ytterkortet som nå er implementert, leser **analoge spenninger**, direkte eller via mux. Det støtter ikke RC-avlesning. Direkte QTR RC er fortsatt tilgjengelig på hovedkortet.
-- Pinner er ukonfigurerte, motorer og ytterkommunikasjon deaktivert. Ingen opplasting er utført.
-- **Ytterdata logges i dette steget. Regulatoren bruker bare seks lokale lesere.** Sidesensorenes kalibrering, valg mellom flere linjefunn og bruk av ytterdata til recovery er neste steg.
+De tolv øvrige ADC-pinnene er GPIO4, 13, 14, 25, 26, 27, 32, 33, 34, 35, 36 og 39. GPIO1/3 er reservert til USB-UART, 6..11 til flash, og 34..39 kan ikke brukes som motorutganger.
 
-Produsent: [identifikasjon](https://www.pololu.com/product/4325/specs), [RC-avlesning](https://www.pololu.com/docs/0J13/2), [analog avlesning](https://www.pololu.com/docs/0J13/3).
+Kortprofilen er valgt ut fra «32s». Bekreft fysisk modell og pinout før kabling. WiFi skal ikke aktiveres når ADC2 brukes; programmet starter verken WiFi eller Bluetooth. **Ikke koble 5 V-signaler til ESP32-GPIO.** Sensorens A/RC-utgave er fortsatt ikke bekreftet; denne porten leser analoge spenninger.
 
-## Valgt arkitektur og alternativer
-
-| Oppsett | Fordel | Ulempe |
-| --- | --- | --- |
-| Bare seks midtlesere | Enkel lokal regulering | Smalt avlest område på ny sensor |
-| Seks midtlesere + seks direkte ytterlesere | Opptil tolv kanaler uten mux, kan dekke hele bredden | Glisnere målepunkter på sidene |
-| Seks midtlesere + multipleksede ytterlesere | Lokal midtgruppe og mulighet for alle ytterpunktene | Mer elektronikk, sekvensiell avlesning og stabiliseringstid |
-| Ett kort med nok innganger | Enklere tidskoordinering | Krever annet kort eller inngangselektronikk |
-
-Hele bredden krever ikke alle leserne: ytterste aktive lesere bestemmer dekningen. Avstanden mellom aktive lesere bestemmer detaljnivået. En smal linje kan havne mellom glisne punkter.
-
-Flere lesere kan forbedre posisjonsestimatet, men stopper ikke pendling automatisk. Støy, høyde, kalibrering, fart og PD-tuning må undersøkes. En tverrgående sensorrekke gir ikke alene et kart over neste sving. Flere svarte grupper må senere behandles som separate funn; gjennomsnitt mellom to streker kan havne på hvitt.
+Kilder: [ESP32 ADC](https://docs.espressif.com/projects/esp-idf/en/v4.4.8/esp32/api-reference/peripherals/adc.html), [byggeprofil](https://docs.platformio.org/en/stable/boards/espressif32/nodemcu-32s.html), [Arduino-ESP32 ADC](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/adc.html).
 
 ## Konfigurasjon
 
-**Hovedkort: `include/board_config.h`**
+Alt står i `include/board_config.h`. Standardpinnene er −1, sensoren er `Unconfigured` og motorene er deaktivert.
 
-- `SensorCount=6`; `SensorPins[0..5]` følger venstre–høyre rekkefølge. Sett `QtrAnalog` først etter bekreftet analogutgave.
-- A4/A5 brukes til I2C. A0–A3 og A6/A7 er de seks analoge inngangene som gjenstår på klassisk Nano. Dette gir ingen ledige ADC-innganger til strøm-/spenningsmåling uten endret oppsett.
-- `AnalogSamplesPerSensor` gir flere tidsprøver av samme kanal. Første ADC-konvertering etter kanalbytte forkastes.
-- Sett motorpinner, polaritet og eventuell enable før `MotorsEnabled` aktiveres. Pinnekontrollen avviser kollisjoner.
+- `SensorCount` må stemme med antall rader i `SensorInputs`.
+- Hver rad er `{physicalIndex, pin, muxChannel}`. `{12,32,-1}` betyr fysisk leser 12 på GPIO32.
+- Indeksene er nullbaserte, sortert venstre–høyre. Utvalget er foreløpig og tettere nær midten.
+- Posisjonsberegningen bruker fysisk indeks, slik at ulike mellomrom ikke behandles som lik avstand.
+- `PhysicalSensorCount` er foreløpig 25. Bekreft sensormodellen.
+- `Sensors=Analog` aktiverer ADC. Råskala er 0–4095; kalibrert skala er fortsatt 0–1000.
+- `MotorPwmHz` styrer LEDC-frekvensen. Regulatorens PWM-skala er fortsatt 0–255.
+- Ugyldige og doble pinner avvises. Oppstartspinner tillates bare med eksplisitt `AllowBootPins` etter elektrisk vurdering.
 
-**Ytterkort: `include/side_config.h`**, felles fil for begge kort:
+For mux: sett `MuxEnabled=true`, velg `MuxSignalPin` og fire `MuxSelectPins`. En rad `{index,-1,channel}` bruker mux-kanal 0..15. Enable kobles aktiv iht. databladet. Noen direkte ADC-pinner kan måtte frigjøres til valgpinner; å slå på en bool skaper ikke fire ekstra GPIO. Flere tidsprøver av samme kanal kan gjennomsnittberegnes uten å blande ulike lesere.
 
-- Sett `LINEFOLLOW_SIDE_ENABLED` til `1` når ytterkortet er konfigurert og tilkoblet.
-- `MainIndices` angir midtgruppens fysiske utganger. Eksempelindeksene er foreløpige.
-- Hver rad i `Inputs` er `{physicalIndex, pin, mux, channel}`. Nullbaserte indekser, sortert venstre–høyre. Velg utganger fritt uten å lese alle mellomliggende kanaler.
-- Direkte: `{0,14,-1,0}` betyr fysisk leser 0 på A0. Mux: `{0,-1,0,3}` betyr leser 0 via kanal 3 på mux 0.
-- `MuxSignalPins` angir ADC-inngangene fra to 16:1-muxer. De deler fire digitale `MuxSelectPins` (S0–S3). Enable må kobles aktiv iht. databladet.
-- `SettleUs`, `DiscardFirstAdc`, `Samples` og `ScanPeriodUs` styrer avlesning. Verdiene er antakelser som må måles.
-- `PollPeriodUs`, `MaxAgeMs`, `ClockHz`, `TimeoutUs` og `ServiceSlackUs` styrer overføring og aldersgrense.
-- Ikke koble samme sensorutgang til begge kort. Bruk felles GND og passende I2C-pullups. Kun hovedkortet skal eventuelt styre sensorbrettets emitterpinner. Begge emittergrupper må være på for dette opptaksoppsettet.
+## Bygg og test
 
-Indekslistene er metadata, ikke mm. Regulatoren normaliserer fortsatt seks jevnt plasserte lokale lesere til 0–5000. Ujevn plassering av midtlesere krever endret posisjonsberegning.
-
-## Timing og overføring
-
-Hovedkortet kjører lokal regulering hver 8000 us, med foreløpig arbeidsgrense 6000 us og tillatt startforsinkelse 1000 us. For sen start under motorforsøk, for lang kontrollrunde, lokal sensorfeil eller utløpt PC-lease gir stopp. Watchdog dekker fastlåst programflyt. Dette er konfigurerte grenser, ikke målte garantier.
-
-Ytterkortet leser én kanal per løkkegjennomgang og publiserer bare hele skann. Hovedkortet ber om et frosset sett og henter 32-byte pakker med CRC og felles sekvensnummer. Forrige komplette sett beholdes ved overføringsfeil. Én bussoperasjon utføres per servicekall når tidsplanleggeren viser nok ledig tid. Mål virkelig bussvarighet og startforsinkelse; timeout beviser ikke maksimal tid for en hel transaksjon.
-
-Begge kort arbeider parallelt uten tråder. Verken venstre/høyre eller midt-/yttergruppene er nødvendigvis lest samtidig. USB-rapporten sendes i små deler når TX-bufferen har plass.
-
-JSON/CSV inneholder `side_sequence`, `side_scan_us`, `side_age_ms`, `side_fresh`, `side_raw`, `side_indices` og `main_indices`. Alder regnes konservativt fra skannestart, inkludert overføringstid, ved PC-snapshot. Ukjente/foreldede ytterverdier blir null/tomme felt. Reell null beholdes. Ytterverdiene er rå ADC, uten egen kalibrering.
-
-PC-opptak er nedprøvde og inneholder ikke alle kontrollrunder eller sideskann. Normal loggrate er ikke egnet til å karakterisere høyfrekvent sensorstøy.
-
-## Bygg og tester
-
-Åpne denne mappen i CLion. CMake bygger fem C++-testmål. Python-testene kjøres av testskriptet:
+Åpne mappen i CLion eller VS Code med PlatformIO. Bygg `esp32` fra PlatformIO-panelet eller kjør:
 
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e master_nano -e side_nano
-.\.venv\Scripts\python.exe tools/run_tests.py
+pio run -e esp32
+python tools/run_tests.py
+python tools/format_code.py --check
+python tools/measure_memory.py
 ```
 
-Miljøer med suffikset `_new_bootloader` finnes for begge Nanoer. Velg korrekt variant før opplasting.
+Bruk prosjektets `.venv` ved Python-kommandoene. Utviklerverktøy installeres fra `requirements-dev.txt`.
 
-Bygg også med den faktiske sensor-/motorprofilen aktivert. Ukonfigurerte verdier kan få kompilatoren til å fjerne kode. Den aktive prøveprofilen bruker nå 1342 byte statisk RAM / 25364 byte flash på hovedkortet, mot tidligere 1450 / 29292. Ytterkortet bruker 495 / 3924. Se [minnegjennomgangen](docs/MINNEBRUK.md) for metode og begrensninger. Stack og virkelig kjøretid må fortsatt måles; prøvepinnene er ikke lagret som robotens kabling.
+Plattformen er låst til `espressif32@6.12.0`, Arduino-ESP32 2.0.17. `esp32_fixture` bygger med tolv direkte kanaler og motorer. `esp32_mux_fixture` bruker åtte direkte og fire mux-kanaler. Fixture-pinner er byggeeksempler, ikke godkjent kabling. Ingen opplasting er utført.
 
-Målerapporter sendes nå som S2-data, og `telemetry.py` lager feltnavn og lesbar JSON på PC. Python-testbenken og hovedfirmwaren må oppdateres sammen. Den eldre Uno-bridgens JSON-format støttes fortsatt.
+## Kontroll og PC-testbenk
 
-For formatering og stilkontroll:
+Kontrollperioden er foreløpig 8 ms, arbeidsgrensen 6 ms og tillatt startforsinkelse 1 ms. Task-watchdog er et separat vern på ett sekund. Maskinvare og watchdog kontrolleres før armering.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe tools/format_code.py
-.\.venv\Scripts\python.exe tools/format_code.py --check
+python hardware_testbed.py --list-ports
+python hardware_testbed.py --port COM5 --test sensors --seconds 5
 ```
 
-## Hardware-testbenk
+Tester: info, sensors, calibrate, timing, motor, sweep og follow. Motorforsøk krever `--confirm-motion`. Kalibreringen gjelder alle valgte lesere og ligger bare i RAM. PC logger nedprøvde målebilder, ikke alle kontrollrunder.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe hardware_testbed.py --list-ports
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sensors --seconds 5
-```
+ESP32 sender S3 med CRC. Python lager feltnavn og CSV/JSON. Nye rapporter har ingen slave-/I2C-felter. Oppdater firmware og Python sammen. PC-programmet kan fortsatt lese eldre S2-/JSON-rapporter.
 
-Koble PC til hoved-Nano. Tester: `info`, `sensors`, `calibrate`, `timing`, `motor`, `sweep`, `follow`. Motorforsøk krever `--confirm-motion` og armering via programmet. Kalibrering gjelder midtgruppen og lagres bare i RAM. CSV/JSON lagres under `runs/`; råopptak overskrives ikke.
+Testene dekker regulator, ujevne sensorposisjoner, kontrollflyt, stopp, UART, CRC, GPIO, ADC, LEDC og mux. De bekrefter ikke fysisk sensorrespons eller faktisk kjøretid på roboten.
 
-Start med sensoropptak og timing. Noter høyde, underlag, lys og forsyning manuelt. Mål kontrast, sideskannetid, alder på ytterdata og maksimal kontrolltid før tuning. PWM er pådrag, ikke kraft eller moment. RPM, strøm og spenning krever egne målekretser.
+## Historikk til rapporten
 
-## Filkart og gjenbruk
-
-- `src/master.cpp`: USB-kommandoer, oppdelt S2-sending og koordinering.
-- `src/control_runtime.cpp`: felles kontroll-runtime med grensesnitt i `include/control_runtime.h`.
-- `src/nano.cpp`: lite inngangspunkt for eldre Nano/Uno-oppsett.
-- `src/side_nano.cpp`: analog avlesning og komplette, frosne sideskann.
-- `src/side_link.cpp`: henting, validering og målealder på hovedkortet.
-- `src/hardware.cpp`: lokale sensorer, motorer og valgfritt måleutstyr.
-- `include/side_protocol.h`: byteformat for sidemålinger.
-- `src/control/`: gjenbrukt PD, recovery og ramper.
-- `hardware_testbed.py`: PC-programmet og CSV-/JSON-opptak.
-- `telemetry.py`: tolkning og validering av S2-målerapporter på PC.
-
-`LINE_MAX_WIDTH` er foreløpig økt fra tre til fem sterke kjernelesere ut fra observasjonen om linjebredde. Andre regulatorverdier er ikke retunet.
-
-De eldre miljøene `nano`, `nano_new_bootloader` og `uno` er beholdt for Uno-bridgen. De bruker ikke ytterkoblingen. Den gamle kodeforklaringen er bevart under `docs/historikk/`; `KODE_FORKLART.md` beskriver nå dagens kode. Git-historikk og tidligere 3D-modeller er bevart.
+To-Nano-løsningen ligger urørt på `fase2`, i [commit 7faf126](https://github.com/TonzN/linefollower/tree/7faf12686bfa70a4d3174b0da3893507ab42d8e3). Dokumentasjonen er også arkivert under `docs/historikk/`. Denne branchen heter `fase2_esp32`, siden Git ikke tillater mellomrom i branchnavn.

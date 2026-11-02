@@ -1,59 +1,175 @@
 #include <Arduino.h>
-#include <QTRSensors.h>
-#include <util/atomic.h>
-#include <math.h>
+#include "board_config.h"
+#include "board_pins.h"
 #include "hardware.h"
 #include "protocol.h"
 
 namespace
 {
-    // Opprettes bare i RC-grenen nedenfor. Analogvarianten trenger ikke QTR-objektet.
-    QTRSensors* rcSensors = nullptr;
     bool sensorOk = false;
     bool motorOk = false;
     volatile uint32_t leftTicks = 0;
     volatile uint32_t rightTicks = 0;
+    portMUX_TYPE encoderMux = portMUX_INITIALIZER_UNLOCKED;
     uint32_t encoderAt = 0;
     uint32_t previousLeft = 0;
     uint32_t previousRight = 0;
+    constexpr uint8_t LeftPwmChannel = 0;
+    constexpr uint8_t RightPwmChannel = 1;
 
-    void leftPulse()
+    void IRAM_ATTR leftPulse()
     {
+        portENTER_CRITICAL_ISR(&encoderMux);
         ++leftTicks;
+        portEXIT_CRITICAL_ISR(&encoderMux);
     }
 
-    void rightPulse()
+    void IRAM_ATTR rightPulse()
     {
+        portENTER_CRITICAL_ISR(&encoderMux);
         ++rightTicks;
+        portEXIT_CRITICAL_ISR(&encoderMux);
     }
 
-    // Reserver hver fysisk pinne én gang, slik at motor, sensor og I2C ikke kolliderer.
-    bool takePin(int8_t pin, bool* used, bool analogOnly = false)
+    enum class PinRole
     {
-        if (pin < 0 || pin > 21 || (!analogOnly && pin > 19) || (analogOnly && pin < 14) ||
-            used[pin])
+        Input,
+        Output,
+        Analog
+    };
+
+    bool takePin(int pin, bool* used, PinRole role)
+    {
+        if (!board_pins::isAvailable(pin, cfg::AllowBootPins) || used[pin])
         {
             return false;
         }
+
+        if (role == PinRole::Output && !board_pins::isOutput(pin))
+        {
+            return false;
+        }
+
+        if (role == PinRole::Analog && !board_pins::isAdc(pin))
+        {
+            return false;
+        }
+
         used[pin] = true;
         return true;
     }
 
-    bool takeMotor(const cfg::MotorPins& p, bool* used)
+    bool takeMotor(const cfg::MotorPins& pins, bool* used)
     {
-        return takePin(p.in1, used) && takePin(p.in2, used) && takePin(p.pwm, used) &&
-               digitalPinHasPWM(p.pwm);
+        return takePin(pins.in1, used, PinRole::Output) &&
+               takePin(pins.in2, used, PinRole::Output) && takePin(pins.pwm, used, PinRole::Output);
     }
 
-    void writeMotor(const cfg::MotorPins& p, int16_t value)
+    bool validatePins()
     {
-        if (p.inverted)
+        bool used[40] = {};
+
+        if (cfg::MotorsEnabled &&
+            (!takeMotor(cfg::LeftMotor, used) || !takeMotor(cfg::RightMotor, used)))
+        {
+            return false;
+        }
+
+        if (cfg::DriverEnablePin >= 0 && !takePin(cfg::DriverEnablePin, used, PinRole::Output))
+        {
+            return false;
+        }
+
+        if (cfg::Sensors == cfg::SensorBackend::Analog)
+        {
+            bool muxChannels[16] = {};
+            bool muxUsed = false;
+
+            for (uint8_t index = 0; index < cfg::SensorCount; ++index)
+            {
+                const auto& input = cfg::SensorInputs[index];
+
+                if (input.physicalIndex >= cfg::PhysicalSensorCount ||
+                    (index > 0 &&
+                     input.physicalIndex <= cfg::SensorInputs[index - 1].physicalIndex))
+                {
+                    return false;
+                }
+
+                if (input.muxChannel == -1)
+                {
+                    if (!takePin(input.pin, used, PinRole::Analog))
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    if (!cfg::MuxEnabled || input.pin != -1 || input.muxChannel < 0 ||
+                        input.muxChannel > 15 || muxChannels[input.muxChannel])
+                    {
+                        return false;
+                    }
+
+                    muxChannels[input.muxChannel] = true;
+                    muxUsed = true;
+                }
+            }
+
+            if (muxUsed)
+            {
+                if (!takePin(cfg::MuxSignalPin, used, PinRole::Analog))
+                {
+                    return false;
+                }
+
+                for (int8_t pin : cfg::MuxSelectPins)
+                {
+                    if (!takePin(pin, used, PinRole::Output))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if (cfg::EmitterPin >= 0 && !takePin(cfg::EmitterPin, used, PinRole::Output))
+            {
+                return false;
+            }
+        }
+
+        const int8_t measurementPins[] = {cfg::VoltagePin, cfg::CurrentPin};
+        for (int8_t pin : measurementPins)
+        {
+            if (pin >= 0 && !takePin(pin, used, PinRole::Analog))
+            {
+                return false;
+            }
+        }
+
+        const int8_t encoderPins[] = {cfg::LeftEncoderPin, cfg::RightEncoderPin};
+        for (int8_t pin : encoderPins)
+        {
+            if (pin >= 0 && (!takePin(pin, used, PinRole::Input) ||
+                             (cfg::EncoderInternalPullups && !board_pins::isOutput(pin))))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    void writeMotor(const cfg::MotorPins& pins, uint8_t channel, int16_t value)
+    {
+        if (pins.inverted)
         {
             value = -value;
         }
-        digitalWrite(p.in1, value > 0 ? HIGH : LOW);
-        digitalWrite(p.in2, value < 0 ? HIGH : LOW);
-        analogWrite(p.pwm, value < 0 ? -value : value);
+
+        digitalWrite(pins.in1, value > 0 ? HIGH : LOW);
+        digitalWrite(pins.in2, value < 0 ? HIGH : LOW);
+        ledcWrite(channel, value < 0 ? -value : value);
     }
 
     int16_t bounded(float value)
@@ -85,126 +201,92 @@ namespace hw
 
     bool begin()
     {
-        bool used[22] = {};
-        used[19] = true;
-        used[18] = true; // A4/A5 er I2C på klassisk Nano.
-        bool valid = true;
-        if (cfg::MotorsEnabled)
-        {
-            valid = takeMotor(cfg::LeftMotor, used) && takeMotor(cfg::RightMotor, used);
-            if (cfg::DriverEnablePin >= 0)
-            {
-                valid = takePin(cfg::DriverEnablePin, used) && valid;
-            }
-        }
-        if (cfg::Sensors == cfg::SensorBackend::QtrRC ||
-            cfg::Sensors == cfg::SensorBackend::QtrAnalog)
-        {
-            for (uint8_t i = 0; i < cfg::SensorCount; i++)
-            {
-                valid = takePin(cfg::SensorPins[i],
-                                used,
-                                cfg::Sensors == cfg::SensorBackend::QtrAnalog) &&
-                        valid;
-            }
-            if (cfg::EmitterPin >= 0)
-            {
-                valid = takePin(cfg::EmitterPin, used) && valid;
-            }
-        }
-        if (cfg::VoltagePin >= 0)
-        {
-            valid = takePin(cfg::VoltagePin, used, true) && valid;
-        }
-        if (cfg::CurrentPin >= 0)
-        {
-            valid = takePin(cfg::CurrentPin, used, true) && valid;
-        }
-        const int8_t encoderPins[] = {cfg::LeftEncoderPin, cfg::RightEncoderPin};
-        for (int8_t pin : encoderPins)
-        {
-            if (pin >= 0)
-            {
-                valid =
-                    takePin(pin, used) && digitalPinToInterrupt(pin) != NOT_AN_INTERRUPT && valid;
-            }
-        }
-        if (!valid)
+        if (!validatePins())
         {
             return false;
         }
+
+        analogReadResolution(cfg::AdcBits);
+        analogSetAttenuation(ADC_11db);
+
         if (cfg::MotorsEnabled)
         {
-            const cfg::MotorPins motorPins[] = {cfg::LeftMotor, cfg::RightMotor};
-            for (const auto& p : motorPins)
+            const cfg::MotorPins motors[] = {cfg::LeftMotor, cfg::RightMotor};
+
+            for (uint8_t channel = 0; channel < 2; ++channel)
             {
-                pinMode(p.in1, OUTPUT);
-                pinMode(p.in2, OUTPUT);
-                pinMode(p.pwm, OUTPUT);
-                writeMotor(p, 0);
+                const auto& pins = motors[channel];
+                pinMode(pins.in1, OUTPUT);
+                pinMode(pins.in2, OUTPUT);
+                digitalWrite(pins.in1, LOW);
+                digitalWrite(pins.in2, LOW);
+
+                if (ledcSetup(channel, cfg::MotorPwmHz, cfg::MotorPwmBits) <= 0)
+                {
+                    return false;
+                }
+
+                ledcAttachPin(pins.pwm, channel);
+                ledcWrite(channel, 0);
             }
+
             if (cfg::DriverEnablePin >= 0)
             {
                 pinMode(cfg::DriverEnablePin, OUTPUT);
                 digitalWrite(cfg::DriverEnablePin, !cfg::DriverEnableActiveHigh);
             }
+
             motorOk = true;
         }
-        if (cfg::Sensors == cfg::SensorBackend::Custom)
+
+        if (cfg::Sensors == cfg::SensorBackend::Analog)
         {
-            sensorOk = custom_sensor::begin() && custom_sensor::maximum() > 0;
-        }
-        else if (cfg::Sensors == cfg::SensorBackend::QtrAnalog)
-        {
-            // Direkte ADC-avlesning; kalibrering skjer allerede i kontroll-runtime.
-            // Unngår å dra med QTRs RC-/emitterstyring på den lille hoved-Nanoen.
+            if (cfg::MuxEnabled)
+            {
+                for (int8_t pin : cfg::MuxSelectPins)
+                {
+                    pinMode(pin, OUTPUT);
+                    digitalWrite(pin, LOW);
+                }
+            }
+
             if (cfg::EmitterPin >= 0)
             {
                 pinMode(cfg::EmitterPin, OUTPUT);
                 digitalWrite(cfg::EmitterPin, HIGH);
                 delay(1);
             }
+
             sensorOk = true;
         }
-        else if (cfg::Sensors == cfg::SensorBackend::QtrRC)
-        {
-            static QTRSensors qtr;
-            rcSensors = &qtr;
-            uint8_t pins[cfg::SensorCount];
-            for (uint8_t i = 0; i < cfg::SensorCount; i++)
-            {
-                pins[i] = cfg::SensorPins[i];
-            }
-            qtr.setTypeRC();
-            qtr.setTimeout(cfg::QtrTimeoutUs);
-            qtr.setSensorPins(pins, cfg::SensorCount);
-            if (cfg::EmitterPin >= 0)
-            {
-                qtr.setEmitterPin(cfg::EmitterPin);
-            }
-            sensorOk = true;
-        }
+
         if (cfg::VoltagePin >= 0)
         {
             measurementFlags |= proto::VoltageValid;
         }
+
         if (cfg::CurrentPin >= 0 && cfg::CurrentVoltsPerAmp > 0)
         {
             measurementFlags |= proto::CurrentValid;
         }
+
         if (cfg::EncoderPulsesPerWheelRevolution > 0)
         {
+            int inputMode = cfg::EncoderInternalPullups ? INPUT_PULLUP : INPUT;
+
             if (cfg::LeftEncoderPin >= 0)
             {
-                pinMode(cfg::LeftEncoderPin, INPUT_PULLUP);
-                attachInterrupt(digitalPinToInterrupt(cfg::LeftEncoderPin), leftPulse, RISING);
+                pinMode(cfg::LeftEncoderPin, inputMode);
+                attachInterrupt(cfg::LeftEncoderPin, leftPulse, RISING);
             }
+
             if (cfg::RightEncoderPin >= 0)
             {
-                pinMode(cfg::RightEncoderPin, INPUT_PULLUP);
-                attachInterrupt(digitalPinToInterrupt(cfg::RightEncoderPin), rightPulse, RISING);
+                pinMode(cfg::RightEncoderPin, inputMode);
+                attachInterrupt(cfg::RightEncoderPin, rightPulse, RISING);
             }
         }
+
         encoderAt = micros();
         return true;
     }
@@ -221,17 +303,7 @@ namespace hw
 
     uint16_t rawMaximum()
     {
-        if (cfg::Sensors == cfg::SensorBackend::Custom)
-        {
-            return custom_sensor::maximum();
-        }
-
-        if (cfg::Sensors == cfg::SensorBackend::QtrAnalog)
-        {
-            return 1023;
-        }
-
-        return cfg::QtrTimeoutUs;
+        return cfg::AdcMaximum;
     }
 
     bool readSensors(uint16_t* raw)
@@ -240,25 +312,37 @@ namespace hw
         {
             return false;
         }
-        if (cfg::Sensors == cfg::SensorBackend::Custom)
+
+        for (uint8_t index = 0; index < cfg::SensorCount; ++index)
         {
-            return custom_sensor::read(raw, cfg::SensorCount);
-        }
-        if (cfg::Sensors == cfg::SensorBackend::QtrAnalog)
-        {
-            for (uint8_t i = 0; i < cfg::SensorCount; i++)
+            const auto& input = cfg::SensorInputs[index];
+            int pin = input.pin;
+
+            if (input.muxChannel >= 0)
             {
-                analogRead(cfg::SensorPins[i]); // Forkast første ADC-konvertering etter kanalbytte.
-                uint32_t sum = 0;
-                for (uint8_t n = 0; n < cfg::AnalogSamplesPerSensor; n++)
+                for (uint8_t bit = 0; bit < 4; ++bit)
                 {
-                    sum += analogRead(cfg::SensorPins[i]);
+                    digitalWrite(cfg::MuxSelectPins[bit], (input.muxChannel >> bit) & 1);
                 }
-                raw[i] = sum / cfg::AnalogSamplesPerSensor;
+
+                pin = cfg::MuxSignalPin;
+                delayMicroseconds(cfg::MuxSettleUs);
             }
-            return true;
+
+            if (cfg::DiscardFirstAdc)
+            {
+                analogRead(pin);
+            }
+
+            uint32_t sum = 0;
+            for (uint8_t sample = 0; sample < cfg::AnalogSamplesPerSensor; ++sample)
+            {
+                sum += analogRead(pin);
+            }
+
+            raw[index] = sum / cfg::AnalogSamplesPerSensor;
         }
-        rcSensors->read(raw, QTRReadMode::On);
+
         return true;
     }
 
@@ -266,20 +350,23 @@ namespace hw
     {
         if (!motorOk)
         {
-            appliedRight = 0;
             appliedLeft = 0;
+            appliedRight = 0;
             return;
         }
+
         appliedLeft = constrain(left, -255, 255);
         appliedRight = constrain(right, -255, 255);
+
         if (cfg::DriverEnablePin >= 0)
         {
             digitalWrite(cfg::DriverEnablePin,
                          (left || right) ? cfg::DriverEnableActiveHigh
                                          : !cfg::DriverEnableActiveHigh);
         }
-        writeMotor(cfg::LeftMotor, appliedLeft);
-        writeMotor(cfg::RightMotor, appliedRight);
+
+        writeMotor(cfg::LeftMotor, LeftPwmChannel, appliedLeft);
+        writeMotor(cfg::RightMotor, RightPwmChannel, appliedRight);
     }
 
     void stop()
@@ -289,46 +376,48 @@ namespace hw
 
     void updateMeasurements(uint32_t now)
     {
+        // ESP32s kalibrerte mV-API brukes til valgfrie spennings-/strømmålinger.
         if (measurementFlags & proto::VoltageValid)
         {
-            voltageMv = uint16_t(constrain(analogRead(cfg::VoltagePin) * cfg::AdcReferenceV / 1023 *
-                                               cfg::VoltageDividerRatio * 1000,
-                                           0.0f,
-                                           65535.0f));
+            float measuredMv = analogReadMilliVolts(cfg::VoltagePin) * cfg::VoltageDividerRatio;
+            voltageMv = uint16_t(constrain(measuredMv, 0.0f, 65535.0f));
         }
+
         if (measurementFlags & proto::CurrentValid)
         {
-            currentMa = bounded(
-                (analogRead(cfg::CurrentPin) * cfg::AdcReferenceV / 1023 - cfg::CurrentZeroV) /
-                cfg::CurrentVoltsPerAmp * 1000);
+            float measuredV = analogReadMilliVolts(cfg::CurrentPin) / 1000.0f;
+            currentMa = bounded((measuredV - cfg::CurrentZeroV) / cfg::CurrentVoltsPerAmp * 1000);
         }
-        uint32_t dt = now - encoderAt;
-        encoderAgeMs = proto::saturated16(dt / 1000);
-        if (dt < cfg::EncoderWindowUs || !cfg::EncoderPulsesPerWheelRevolution)
+
+        uint32_t elapsedUs = now - encoderAt;
+        encoderAgeMs = proto::saturated16(elapsedUs / 1000);
+
+        if (elapsedUs < cfg::EncoderWindowUs || cfg::EncoderPulsesPerWheelRevolution == 0)
         {
             return;
         }
-        uint32_t left;
-        uint32_t right;
-        ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-        {
-            left = leftTicks;
-            right = rightTicks;
-        }
-        const float factor = 600000000.0f / (dt * float(cfg::EncoderPulsesPerWheelRevolution));
+
+        portENTER_CRITICAL(&encoderMux);
+        uint32_t left = leftTicks;
+        uint32_t right = rightTicks;
+        portEXIT_CRITICAL(&encoderMux);
+
+        float factor = 600000000.0f / (elapsedUs * float(cfg::EncoderPulsesPerWheelRevolution));
         leftRpm10 = bounded((left - previousLeft) * factor);
         rightRpm10 = bounded((right - previousRight) * factor);
+        previousLeft = left;
+        previousRight = right;
+        encoderAt = now;
+        encoderAgeMs = 0;
+
         if (cfg::LeftEncoderPin >= 0)
         {
             measurementFlags |= proto::LeftRpmValid;
         }
+
         if (cfg::RightEncoderPin >= 0)
         {
             measurementFlags |= proto::RightRpmValid;
         }
-        encoderAgeMs = 0;
-        previousLeft = left;
-        previousRight = right;
-        encoderAt = now;
     }
 } // namespace hw

@@ -26,18 +26,21 @@ common = [
 ]
 for source, name, fakes in [
     ("test_runtime.cpp", "runtime_tests", False),
-    ("test_nano.cpp", "nano_runtime_tests", True),
+    ("test_control_runtime.cpp", "control_runtime_tests", True),
     ("test_master.cpp", "master_tests", True),
-    ("test_side_link.cpp", "side_link_tests", True),
-    ("test_side_nano.cpp", "side_nano_tests", True),
+    ("test_board_pins.cpp", "board_pins_tests", False),
+    ("test_hardware.cpp", "hardware_tests", True),
+    ("test_hardware.cpp", "hardware_mux_tests", True),
 ]:
     output = build / (name + ".exe" if sys.platform == "win32" else name)
     includes = ["-I", str(root / "include"), "-I", str(root / "include/control")]
     if fakes:
         includes = ["-I", str(root / "tests/fakes")] + includes
     sources = common
-    if name == "side_nano_tests":
-        includes = ["-I", str(root / "tests/side_config")] + includes
+    if name in ("hardware_tests", "hardware_mux_tests"):
+        includes += ["-DLINEFOLLOW_BUILD_FIXTURE"]
+        if name == "hardware_mux_tests":
+            includes += ["-DLINEFOLLOW_MUX_FIXTURE"]
         sources = []
     subprocess.run(
         [
@@ -58,19 +61,17 @@ for source, name, fakes in [
         "\n".join(
             line
             for line in result.stdout.splitlines()
-            if not line.startswith(("{", "S2:"))
+            if not line.startswith(("{", "S2:", "S3:"))
         )
     )
     if name == "master_tests":
         samples = [
             decode_sample((line + "\n").encode("ascii"))
             for line in result.stdout.splitlines()
-            if line.startswith("S2:")
+            if line.startswith("S3:")
         ]
         assert len(samples) == 2 and samples[0]["time_us"] == 0xF1234567
-        assert samples[0]["side_raw"] == [None] * 6
-        assert samples[1]["side_raw"][:2] == [0, 950]
-        assert (
-            len(samples[1]["main_indices"]) == 6
-            and len(samples[1]["side_indices"]) == 6
-        )
+        assert samples[0]["sensor_count"] == 12
+        assert samples[1]["raw"][:2] == [0, 950]
+        assert len(samples[1]["sensor_indices"]) == 12
+        assert "side_count" not in samples[1]

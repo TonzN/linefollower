@@ -1,73 +1,53 @@
-# Slik er linjefølgeren bygget opp
+# Linjefølgeren med ett ESP32-kort
 
-## Formålet
-
-Roboten skal følge en mørk linje på et lysere underlag. To motorer driver hjulene bak sensorrekken. Når hjulene får forskjellig pådrag, svinger roboten. Chassiset er egenkonstruert og 3D-printet.
-
-Første versjon brukte seks lesere. Gruppen observerte omtrent to lesere over linjen. Den nye sensorrekken gir etter foreløpig observasjon 4–5 lesere over samme linje. Det gir flere målepunkter over linjen, men sier ikke alene hvor presist eller raskt roboten vil kjøre.
-
-## Kortene og ansvaret deres
-
-| Del | Ansvar |
-| --- | --- |
-| Hoved-Nano | Seks lokale midtlesere, kalibrering, regulator, motorer, tidskontroll og PC-kommandoer |
-| Ytter-Nano | Valgte ytterlesere, eventuelle analoge multipleksere, komplette sideskann og I2C-svar |
-| PC | Starte måleforsøk, tolke rapporter, sette navn på feltene og lagre CSV/JSON |
-
-Hovedkortet er I2C-controller/master. Ytterkortet er perifer/slave. Begge har egne programmer og kjører samtidig; hvert kort har én vanlig hovedløkke. Vi bruker ikke tråder.
+To motorer driver roboten, og sensorrekken sitter foran motorene på et 3D-printet chassis. ESP32 leser valgte sensorer og endrer forskjellen mellom hjulenes pådrag for å følge linjen.
 
 ```mermaid
 flowchart LR
-    PC[PC og testbenk] <-->|USB| Main[Hoved-Nano]
-    Center[Seks midtlesere] --> Main
-    Main --> Motors[To motorer via driver]
-    Main <-->|I2C| Side[Ytter-Nano]
-    Outer[Valgte ytterlesere] --> Mux[Direkte eller analog mux]
-    Mux --> Side
+    PC[PC-testbenk] <-->|USB-UART| MCU[ESP32-S / NodeMCU-32S]
+    Direct[Direkte analoglesere] --> MCU
+    Optional[Valgfrie ekstra lesere] --> MUX[Valgfri analog mux]
+    MUX --> MCU
+    MCU --> Driver[Motordriver]
+    Driver --> Motors[To motorer]
 ```
 
-## Hva sensoren måler
+## Valg av antall og kort
 
-En reflektansleser sender IR-lys mot underlaget og måler reflektert lys. Det er verken et kamera eller en avstandsmåler for kommende svinger. Svart/hvitt-kontrasten påvirkes blant annet av underlag, høyde, belysning og emitterinnstillinger.
+Den gamle sensoren ga etter gruppens observasjon omtrent to lesere over linjen; den nye omtrent 4–5. Dette er antall fysiske lesere på sensorrekken, ikke et dokumentert presisjonsmål. Når noen utganger utelates, blir antall aktive treff også lavere.
 
-Identifikasjonen er fortsatt foreløpig: `0J11785` matcher QTRX-HD-25, mens oppgitt `irs47j` avviker fra produsentens `irs45j`. A/RC-utgaven må bekreftes. [Pololus spesifikasjoner](https://www.pololu.com/product/4325/specs) sier at PCB-merkingen ikke skiller disse utgavene.
+Brikken har 18 ADC-kanaler, men vi velger **12 direkte lesere** som standard på 32S. GPIO37/38 er ikke tilgjengelige kortpinner i profilen, og fire øvrige ADC-pinner har oppstartsfunksjoner. De kan ikke regnes som fritt tilgjengelige uten å undersøke elektronikken.
 
-Ytterprogrammet er laget for analogutgaven. Råverdien er da en ADC-verdi 0–1023. Hovedkortets kalibrerte verdi er 0–1000, der høy verdi betyr mørkere funn etter normal kalibrering. Dette er to forskjellige skalaer.
+Utvalget bruker foreløpige indekser som er tettere i midten og glisnere utover. Ytterpunktene dekker bredden. Dette gir verken et kamera eller sikker kunnskap om neste sving. Flere streker i samme målebilde må fortsatt behandles som separate kandidater.
 
-## Hvorfor vi deler sensorrekken
+## Pinner og elektriske forutsetninger
 
-Hovedkortet får direkte avlesning av de seks midtleserne. Det gir et lokalt grunnlag for regulering uten å vente på I2C. Ytterkortet kan bruke seks direkte analoginnganger eller flere valgte kanaler gjennom multipleksere.
+| Gruppe | Pinner / regel |
+| --- | --- |
+| Direkte ADC uten strapping | GPIO4, 13, 14, 25, 26, 27, 32, 33, 34, 35, 36, 39 |
+| Blokkerte oppstartspinner | GPIO0, 2, 5, 12, 15 |
+| USB-UART | GPIO1 og 3 er reservert |
+| Flash | GPIO6–11 er reservert |
+| Input-only | GPIO34–39 kan ikke være motor- eller mux-utganger |
 
-Det er ikke nødvendig å bruke alle lesere for å dekke hele bredden. De ytterste aktive leserne bestemmer dekningen. Antall og avstand mellom aktive lesere bestemmer detaljnivået mellom ytterpunktene. For store mellomrom kan skjule en smal linje.
+Valgfri ADC-strøm-/spenningsmåling må ha en ledig inngang. Alle tolv direkte kanaler opptar kandidatlisten over, så måleutstyr kan kreve endret sensorutvalg eller mux. Encoder på input-only-pinner krever ekstern pullup der det er nødvendig.
 
-Multipleksing bevarer hver valgt kanal som en egen verdi. Den gir tidsforskjell mellom kanalene og krever stabilisering etter kanalbytte. Dette må skilles fra gjennomsnitt av flere sensorer, som blander romlig informasjon.
+GPIO er 3,3 V-logikk og skal ikke få 5 V. Sensoren kan eventuelt forsynes med en kompatibel spenning, eller signalene må tilpasses. Bekreft analog/RC-utgaven før kobling. ADC-attenuasjon gjør ikke inngangene 5 V-tolerante, og måleområdet kan mettes før 3,3 V. Mål faktisk svart/hvitt-kontrast.
 
-## Hvordan roboten styrer
+Programmet aktiverer ikke radio. ADC2 har en ressurskonflikt med WiFi, så WiFi må ikke bare slås på senere uten ny vurdering.
 
-1. Les midtgruppen.
-2. Bruk kalibreringen til å gjøre kanalene sammenlignbare.
-3. Finn en troverdig gruppe som ser linjen.
-4. Beregn posisjonsfeil fra et vektet gjennomsnitt innenfor den valgte gruppen.
-5. Bruk P-leddet til å styre mot linjen og D-leddet til å dempe endring i feilen.
-6. Begrens og ramp motorutgangene.
+## Mulighet for multipleksing
 
-Ved kort linjetap kan regulatoren håndtere et gap. Ved lengre tap bruker den historikk til å bremse og søke. Gjenfunn må bekreftes før normal følging gjenopptas. Kvalitet og kjøremodus forklares i [kodeveiledningen](../KODE_FORKLART.md).
+Én analog 16:1-mux kan kobles til en ADC-inngang og fire valgpinner. Programmet støtter blanding av direkte og multipleksede kanaler. For å frigjøre valgpinner kan noen nåværende ADC-pinner brukes som digitale utganger i stedet.
 
-PWM er et elektrisk pådrag. Det er ikke en målt fart, kraft eller akselerasjon. Motor, gir, batteri, belastning og underlag påvirker hva roboten faktisk gjør.
+Standard antall forblir tolv. For å øke antallet endres `SensorCount` og `SensorInputs`, samt pinnebudsjettet. En mux beholder hver kanals verdi, men gir sekvensiell lesing og stabiliseringstid. Vi beregner ikke gjennomsnitt mellom ulike sensorer.
 
-## Hva som er ferdig, og hva som gjenstår
+## Hva som må måles
 
-Programmet har fast kontrollperiode, tidsmålinger, kalibrering av midtgruppen, PD/recovery, feilstopper, motorforsøk og logging av midt-/ytterdata. Ytterverdiene er foreløpig råverdier som logges; de styrer ikke motorene.
+Elektronikken er ennå ikke klar til fysisk avlesning. Start med å bekrefte modell, forsyning, signalnivåer og GPIO. Deretter måles kontrast, støy, avlesningstid og maksimal kontrolltid. Noter sensorhøyde, lys, underlag og batterispenning sammen med opptakene.
 
-Gjenstående arbeid omfatter korrekt pinneoppsett, sensoridentifikasjon, måling av elektronikken, egen kalibrering for yttergruppen og eventuell sammenslåing av observasjoner. Flere linjefunn skal vurderes som separate kandidater. En linje langt ute kan være riktig fortsettelse eller en annen del av banen; én sensorrekke kan ikke avgjøre dette sikkert uten historikk eller flere observasjoner.
+Regulatoren og tidsgrensene er videreført som utgangspunkt. Alle valgte kanaler deltar nå i samme lokale analyse. Større informasjonsgrunnlag kan hjelpe, men løser ikke pendling automatisk. PD, fart og recovery må tunes på roboten.
 
-## Før fysisk testing
+Den tidligere to-Nano-arkitekturen og dens begrunnelse er bevart på `fase2` og under [historikk](historikk/LINJEFOLGEREN_NANO.md).
 
-- Bekreft sensorvariant, kortvariant, driver, forsyning og kabling.
-- Bruk konfigurasjonsfilene; eksempelpinner fra minnetesten er ikke robotens koblingsskjema.
-- Start med sensor- og timingopptak.
-- Noter høyde, underlag, lys og spenning sammen med opptaket.
-- Mål svart/hvitt-kontrast, støy, sideskannetid, målealder og tidsfristbrudd.
-- Tune regulatoren først når verdier og tidsmålinger er forståelige.
-
-Maskinvare er ennå ikke ferdig til avlesningsforsøk. Programtester og vellykkede bygg bekrefter derfor ikke fysisk sensorrespons eller robotens kjøreegenskaper.
+Kilder: [Espressif ADC](https://docs.espressif.com/projects/esp-idf/en/v4.4.8/esp32/api-reference/peripherals/adc.html), [NodeMCU-32S](https://docs.platformio.org/en/stable/boards/espressif32/nodemcu-32s.html), [ADC-måleområder](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/adc.html).

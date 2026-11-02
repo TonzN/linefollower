@@ -25,11 +25,3 @@ namespace hw
     extern int16_t leftRpm10;
     extern int16_t rightRpm10;
 } // namespace hw
-
-// Tilpass disse tre funksjonene når sensormodell/grensesnitt er kjent.
-namespace custom_sensor
-{
-    bool begin();
-    bool read(uint16_t* raw, uint8_t count);
-    uint16_t maximum();
-} // namespace custom_sensor

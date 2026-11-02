@@ -20,28 +20,9 @@ int main()
         frame[i] ^= 1;
     }
     assert(!proto::valid(frame, 31));
-    uint8_t snapshot[proto::SnapshotSize];
-    uint8_t pages[proto::PageCount][32];
-    uint8_t joined[proto::SnapshotSize];
-    for (uint16_t i = 0; i < sizeof(snapshot); i++)
-    {
-        snapshot[i] = i;
-    }
-    proto::makePages(snapshot, 65535, pages);
-    for (uint8_t page = 0; page < proto::PageCount; page++)
-    {
-        assert(proto::valid(pages[page], 32));
-        assert(proto::get16(pages[page] + 3) == 65535);
-        for (uint8_t i = 0; i < proto::PageData; i++)
-        {
-            uint16_t offset = uint16_t(page) * proto::PageData + i;
-            if (offset < sizeof(snapshot))
-            {
-                joined[offset] = pages[page][7 + i];
-            }
-        }
-    }
-    assert(!memcmp(snapshot, joined, sizeof(snapshot)));
+    uint8_t bytes[4];
+    proto::put32(bytes, 0xF1234567);
+    assert(proto::get32(bytes) == 0xF1234567);
     runtime::Scheduler schedule(100);
     assert(!schedule.due(99));
     assert(schedule.due(100));
@@ -87,9 +68,13 @@ int main()
     // Den nye linjen dekker etter oppgitt observasjon 4–5 lesere, ikke bare to.
     for (uint8_t i = 0; i < SensorCount; i++)
     {
-        values[i] = i < 5 ? 950 : 0;
+        values[i] = i >= 3 && i < 8 ? 950 : 0;
     }
     assert(analyzeLine(values).valid);
+    // Ujevnt fordelt utvalg må bruke fysisk indeks, ikke valgt kanalnummer.
+    memset(values, 0, sizeof(values));
+    values[3] = 950;
+    assert(analyzeLine(values).error == cfg::sensorPosition(3) - CENTER);
     LineController controller;
     for (uint32_t now = 0; now < 500; now += 8)
     {
@@ -107,5 +92,5 @@ int main()
     controller.stop();
     controller.update(right, 908);
     assert(controller.left == 0 && controller.stopped);
-    std::cout << "Protocol, CRC, snapshot pages, scheduler rollover, sweep and controller OK\n";
+    std::cout << "Protocol, CRC, byte encoding, scheduler rollover, sweep and controller OK\n";
 }

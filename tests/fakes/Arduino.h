@@ -64,7 +64,7 @@ extern uint32_t fakeMicros;
 #define HIGH 1
 #define LOW 0
 #define OUTPUT 1
-extern int fakePinValues[22];
+extern int fakePinValues[40];
 
 inline void pinMode(int, int)
 {
@@ -103,3 +103,63 @@ template <class T> inline T max(T a, T b)
 }
 
 #define constrain(v, lo, hi) ((v) < (lo) ? (lo) : ((v) > (hi) ? (hi) : (v)))
+
+#define INPUT 0
+#define INPUT_PULLUP 2
+#define RISING 1
+#define IRAM_ATTR
+#define ADC_11db 3
+using portMUX_TYPE = int;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define portENTER_CRITICAL(lock) ((void)(lock))
+#define portEXIT_CRITICAL(lock) ((void)(lock))
+#define portENTER_CRITICAL_ISR(lock) ((void)(lock))
+#define portEXIT_CRITICAL_ISR(lock) ((void)(lock))
+extern uint32_t fakePwmDuty[2];
+
+inline void analogReadResolution(int)
+{
+}
+
+inline void analogSetAttenuation(int)
+{
+}
+
+inline double ledcSetup(int, uint32_t frequency, uint8_t)
+{
+    return frequency;
+}
+
+inline void ledcAttachPin(int, int)
+{
+}
+
+inline void ledcWrite(int channel, uint32_t duty)
+{
+    fakePwmDuty[channel] = duty;
+}
+
+inline void attachInterrupt(int, void (*)(), int)
+{
+}
+
+inline void delay(uint32_t ms)
+{
+    fakeMicros += 1000 * ms;
+}
+
+uint32_t analogReadMilliVolts(int pin);
+
+namespace platform_runtime
+{
+    inline bool watchdogOk = true;
+
+    inline bool beginWatchdog()
+    {
+        return watchdogOk;
+    }
+
+    inline void feedWatchdog()
+    {
+    }
+} // namespace platform_runtime

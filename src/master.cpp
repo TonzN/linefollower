@@ -1,7 +1,5 @@
-// Hoved-Nano: samme regulator/runtime som tidligere, nå med USB direkte til PC.
+// Ett ESP32-kort: kontrollprogram og USB-testbenk, uten I2C.
 #include <Arduino.h>
-#include "side_config.h"
-#include "side_link.h"
 #include "control_runtime.h"
 #include <stdlib.h>
 
@@ -21,11 +19,8 @@ namespace host
     bool sendingTelemetry = false;
     uint16_t sequence = 0;
     const uint8_t* snapshot = nullptr;
-    sideproto::Sample sideSnapshot;
-    uint16_t sideAgeMs = 65535;
-    bool sideFresh = false;
 
-    // Tekstene ligger i flash (PSTR), ikke i den lille SRAM-en på Nano.
+    // Faste tekster leses med Arduino-kjernens flash-kompatible tekstfunksjoner.
     // Svarbufferen brukes kun til korte kommando-/feilsvar, aldri hele målerapporten.
     void appendCharacter(char character)
     {
@@ -145,7 +140,7 @@ namespace host
         if (!strcmp_P(name, PSTR("HELLO")))
         {
             control_runtime::keepAlive();
-            respond(PSTR("{\"kind\":\"hello\",\"protocol\":2}"));
+            respond(PSTR("{\"kind\":\"hello\",\"protocol\":3}"));
             return;
         }
         if (!strcmp_P(name, PSTR("POLL")))
@@ -157,9 +152,6 @@ namespace host
             }
             control_runtime::keepAlive();
             snapshot = control_runtime::captureSnapshot();
-            sideSnapshot = side_link::latest();
-            sideAgeMs = side_link::ageMs(micros());
-            sideFresh = side_link::fresh(micros());
             prefixAt = 0;
             telemetryByteIndex = 0;
             telemetryChecksum = 0;
@@ -262,16 +254,9 @@ namespace host
         acknowledge(commandSequence);
     }
 
-    // Rapportformat S2: to antall, lokalt målebilde, sidemetadata, ytterverdier,
-    // fysiske indekser og CRC8. Hver byte sendes som to heksadesimale tegn.
-    // Python gir feltene navn og lager lesbar JSON/CSV; Nano trenger ingen printf.
-    constexpr uint16_t TelemetryPayloadSize =
-        2 + control_runtime::SnapshotSize + 7 + 3 * sidecfg::Count + cfg::SensorCount;
-
-    uint8_t byteOf(uint16_t value, uint8_t byteIndex)
-    {
-        return byteIndex == 0 ? uint8_t(value) : uint8_t(value >> 8);
-    }
+    // S3: kanalantall, frosset snapshot, fysiske sensorindekser og CRC8.
+    // Hex gir en linje uten binære linjeskift. Python lager lesbar JSON/CSV.
+    constexpr uint16_t TelemetryPayloadSize = 1 + control_runtime::SnapshotSize + cfg::SensorCount;
 
     uint8_t telemetryByte(uint16_t index)
     {
@@ -280,55 +265,14 @@ namespace host
             return cfg::SensorCount;
         }
 
-        if (index == 1)
-        {
-            return sidecfg::Count;
-        }
-
-        index -= 2;
+        --index;
 
         if (index < control_runtime::SnapshotSize)
         {
             return snapshot[index];
         }
 
-        index -= control_runtime::SnapshotSize;
-
-        if (index < 2)
-        {
-            return byteOf(sideSnapshot.sequence, index);
-        }
-
-        if (index < 4)
-        {
-            return byteOf(sideAgeMs, index - 2);
-        }
-
-        if (index < 6)
-        {
-            return byteOf(sideSnapshot.scanUs, index - 4);
-        }
-
-        if (index == 6)
-        {
-            return (sideFresh ? 1 : 0) | (sideSnapshot.valid ? 2 : 0);
-        }
-
-        index -= 7;
-
-        if (index < 2 * sidecfg::Count)
-        {
-            return byteOf(sideSnapshot.raw[index / 2], index % 2);
-        }
-
-        index -= 2 * sidecfg::Count;
-
-        if (index < sidecfg::Count)
-        {
-            return sidecfg::Inputs[index].physicalIndex;
-        }
-
-        return sidecfg::MainIndices[index - sidecfg::Count];
+        return cfg::SensorInputs[index - control_runtime::SnapshotSize].physicalIndex;
     }
 
     uint8_t updateChecksum(uint8_t checksum, uint8_t value)
@@ -358,7 +302,7 @@ namespace host
             {
                 if (prefixAt < 3)
                 {
-                    Serial.write("S2:"[prefixAt++]);
+                    Serial.write("S3:"[prefixAt++]);
                 }
                 else if (telemetryByteIndex <= TelemetryPayloadSize)
                 {
@@ -438,9 +382,6 @@ namespace host
     }
 } // namespace host
 
-static_assert(sizeof(sidecfg::MainIndices) == cfg::SensorCount,
-              "Main index list must match local sensor count");
-
 void setup()
 {
     control_runtime::begin();
@@ -454,8 +395,11 @@ void loop()
     {
         host::service();
     }
-    if (control_runtime::hasTimeFor(sidecfg::ServiceSlackUs))
+
+    // Gi FreeRTOS/idle-oppgavene tid når vi har margin til neste kontrollrunde.
+    // Vi venter ikke nær fristen; faktisk forsinkelse må fortsatt måles på kortet.
+    if (control_runtime::hasTimeFor(2000))
     {
-        side_link::service(micros());
+        delay(1);
     }
 }

@@ -1,4 +1,4 @@
-"""Fysisk testbenk: USB til hoved-Nano (evt. eldre Uno-bridge).
+"""Fysisk testbenk: USB til ESP32, med støtte for eldre Nano-protokoll.
 
 Eksempel: python hardware_testbed.py --port COM5 --test sensors --seconds 5
 Dette er målinger på maskinvare, ikke Python-simulatoren fra forrige prosjekt.
@@ -22,7 +22,7 @@ RESULTS = {
     3: "Maskinvare/pinner er ikke konfigurert",
     4: "Motorene er ikke armert",
     5: "Sensorene må kalibreres",
-    6: "Nano er opptatt",
+    6: "Kortet er opptatt",
     7: "Feil er låst; kjør CLEAR",
 }
 MODE_NAMES = {
@@ -40,6 +40,8 @@ FAULT_NAMES = {
     2: "late_start",
     3: "link_lost",
     4: "sensor_read",
+    5: "configuration",
+    6: "watchdog",
 }
 MOTION_TESTS = {"motor", "sweep", "follow"}
 
@@ -62,7 +64,7 @@ class SerialBridge:
             if not line:
                 continue
             try:
-                if line.startswith(b"S2:"):
+                if line.startswith((b"S2:", b"S3:")):
                     message = decode_sample(line)
                 else:
                     message = json.loads(line.decode("utf-8"))
@@ -86,6 +88,8 @@ class SerialBridge:
             or len(sample.get("calibrated", [])) != count
         ):
             raise BoardError("Sensorlisten er ufullstendig")
+        if "sensor_indices" in sample and len(sample["sensor_indices"]) != count:
+            raise BoardError("Ufullstendig liste med sensorindekser")
         if "side_count" in sample:
             side_count = sample["side_count"]
             if not isinstance(side_count, int) or not 1 <= side_count <= 25:
@@ -108,9 +112,9 @@ class SerialBridge:
             if sample.get("ack_sequence") == sequence:
                 result = sample["ack_result"]
                 if result:
-                    raise BoardError(RESULTS.get(result, f"Nano-feil {result}"))
+                    raise BoardError(RESULTS.get(result, f"Kortfeil {result}"))
                 return sample
-        raise BoardError(f"Nano bekreftet ikke kommando {sequence}")
+        raise BoardError(f"Kortet bekreftet ikke kommando {sequence}")
 
 
 def milliseconds(seconds):
@@ -128,7 +132,7 @@ def test_command(args):
     if args.test == "motor":
         if not -255 <= args.left <= 255 or not -255 <= args.right <= 255:
             raise ValueError(
-                "PWM må være -255..255; Nano har i tillegg egen testgrense"
+                "PWM må være -255..255; kortet har i tillegg egen testgrense"
             )
         return f"MOTOR {args.left} {args.right} {duration}", duration / 1000
     if args.test == "sweep":
@@ -154,7 +158,14 @@ def test_command(args):
 
 
 def flatten(sample, label, elapsed_s, received_s, gap):
-    arrays = ("raw", "calibrated", "side_raw", "side_indices", "main_indices")
+    arrays = (
+        "raw",
+        "calibrated",
+        "side_raw",
+        "side_indices",
+        "main_indices",
+        "sensor_indices",
+    )
     row = {key: value for key, value in sample.items() if key not in ("kind", *arrays)}
     row.update(
         label=label,
@@ -233,7 +244,7 @@ def run_test(bridge, args, output, *, clock=time.monotonic, sleep=time.sleep):
                 now = clock()
                 if sample["fault"]:
                     raise BoardError(
-                        "Nano stoppet: "
+                        "Kortet stoppet: "
                         + FAULT_NAMES.get(sample["fault"], str(sample["fault"]))
                     )
                 if last_tick != sample["sample"]:
@@ -299,7 +310,7 @@ def run_test(bridge, args, output, *, clock=time.monotonic, sleep=time.sleep):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", help="USB-porten til hoved-Nano, for eksempel COM5")
+    parser.add_argument("--port", help="USB-porten til ESP32, for eksempel COM5")
     parser.add_argument("--list-ports", action="store_true")
     parser.add_argument(
         "--test",
@@ -347,7 +358,7 @@ def main():
             time.sleep(2)  # Arduino-kortet kan starte på nytt når USB-porten åpnes.
             port.reset_input_buffer()
             bridge = SerialBridge(port)
-            if bridge.request("HELLO", "hello").get("protocol") not in (1, 2):
+            if bridge.request("HELLO", "hello").get("protocol") not in (1, 2, 3):
                 raise BoardError("Feil protokollversjon")
             if args.test == "info":
                 print(json.dumps(bridge.poll(), indent=2))
@@ -359,7 +370,7 @@ def main():
                 result = run_test(bridge, args, output)
                 print(f"Lagret {result['logged_samples']} prøver: {output}")
     except KeyboardInterrupt:
-        parser.exit(130, "Avbrutt. Stopp er forsøkt sendt til Nano.\n")
+        parser.exit(130, "Avbrutt. Stopp er forsøkt sendt til kortet.\n")
     except (BoardError, ValueError, OSError, serial.SerialException) as exc:
         parser.exit(1, str(exc) + "\n")
 

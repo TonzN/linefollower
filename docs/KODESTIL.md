@@ -19,17 +19,17 @@ C++ har flere etablerte stiler, og ingen enkelt stil alle prosjekter må følge 
 ## Eksempel
 
 ```cpp
-// Foreldede sidedata skal ikke brukes som om linjen nettopp ble sett.
-if (!side_link::fresh(nowUs))
+// Uten konfigurert sensor finnes det ingen måling vi kan styre etter.
+if (!hw::sensorReady())
 {
     return;
 }
 
-const auto& sample = side_link::latest();
-logSideReadings(sample);
+uint16_t rawValues[cfg::SensorCount] = {};
+hw::readSensors(rawValues);
 ```
 
-Kommentaren forklarer hvorfor kontrollen finnes. En kommentar som bare sier «returnerer hvis ikke fersk» ville ikke gitt ekstra hjelp.
+Kommentaren forklarer hvorfor kontrollen finnes. En kommentar som bare sier «returnerer hvis sensoren ikke er klar» ville ikke gitt ekstra hjelp.
 
 ## Hva bør kommenteres?
 

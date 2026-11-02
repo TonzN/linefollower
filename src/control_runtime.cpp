@@ -1,28 +1,12 @@
 #include <Arduino.h>
-#include <Wire.h>
-#include <util/atomic.h>
-#include <avr/wdt.h>
+#include "platform_runtime.h"
 #include "board_config.h"
 #include "control_runtime.h"
-#if defined(LINEFOLLOW_MASTER)
-#include "side_config.h"
-#endif
 #include "protocol.h"
 #include "runtime_core.h"
 #include "hardware.h"
 #include "linefollow.h"
 #include "conf.h"
-
-// Hindrer watchdog-reset-loop med bootloadere som ikke selv slår av WDT.
-#if defined(__AVR__)
-void watchdogOff() __attribute__((naked, section(".init3")));
-
-void watchdogOff()
-{
-    MCUSR = 0;
-    wdt_disable();
-}
-#endif
 
 namespace control_runtime
 {
@@ -30,18 +14,15 @@ namespace control_runtime
     using proto::Fault;
     using proto::Mode;
     using proto::Result;
-    volatile uint8_t selectedPage = 0;
-    volatile bool pending = false;
-    volatile bool heartbeat = false;
-    volatile bool stopRequested = false;
-    volatile bool dropped = false;
-    volatile uint16_t stopSequence = 0;
+    bool pending = false;
+    bool heartbeat = false;
+    bool stopRequested = false;
+    bool dropped = false;
+    bool watchdogReady = false;
+    uint16_t stopSequence = 0;
     uint8_t mailbox[proto::FrameSize];
-#if defined(LINEFOLLOW_MASTER)
     uint8_t masterSnapshot[proto::HeaderSize + 4 * cfg::SensorCount];
-#else
-    uint8_t pages[proto::PageCount][proto::FrameSize];
-#endif
+
     uint16_t raw[cfg::SensorCount] = {};
     uint16_t calibrated[cfg::SensorCount] = {};
     uint16_t calibrationMin[cfg::SensorCount];
@@ -94,68 +75,13 @@ namespace control_runtime
         armed = false;
         idle();
     }
-#if !defined(LINEFOLLOW_MASTER)
-    void onReceive(int count)
-    {
-        uint8_t message[proto::FrameSize];
-        uint8_t size = 0;
-        while (Wire.available())
-        {
-            uint8_t value = Wire.read();
-            if (size < proto::FrameSize)
-            {
-                message[size++] = value;
-            }
-        }
-        if (count != proto::FrameSize || !proto::valid(message, size))
-        {
-            return;
-        }
-        Command command = Command(message[2]);
-        if (command == Command::SelectPage)
-        {
-            if (message[5] == 1 && message[6] < proto::PageCount)
-            {
-                selectedPage = message[6];
-            }
-            return;
-        }
-        if (command == Command::Heartbeat)
-        {
-            heartbeat = true;
-            return;
-        }
-        if (command == Command::Stop)
-        {
-            stopSequence = proto::get16(message + 3);
-            stopRequested = true;
-            pending = false;
-            return;
-        }
-        if (pending)
-        {
-            dropped = true;
-            return;
-        }
-        memcpy(mailbox, message, sizeof(mailbox));
-        pending = true;
-    }
 
-    void onRequest()
-    {
-        Wire.write(pages[selectedPage], proto::FrameSize);
-    }
-#endif
-
-    // Fast byteformat gjør at AVR og PC tolker de samme feltene likt.
+    // Fast byteformat gjør at ESP32 og PC tolker de samme feltene likt.
     // Feltenes offset og enheter er dokumentert i docs/PROTOKOLL.md.
     void publish(uint16_t sequence)
     {
-#if defined(LINEFOLLOW_MASTER)
         uint8_t snapshot[sizeof(masterSnapshot)] = {};
-#else
-        uint8_t snapshot[proto::SnapshotSize] = {};
-#endif
+
         proto::put32(snapshot, sampleNumber);
         proto::put32(snapshot + 4, sampleAt);
         proto::put16(snapshot + 8, proto::saturated16(sensorUs));
@@ -199,17 +125,8 @@ namespace control_runtime
             proto::put16(snapshot + 64 + 2 * i, raw[i]);
             proto::put16(snapshot + 64 + 2 * cfg::SensorCount + 2 * i, calibrated[i]);
         }
-#if defined(LINEFOLLOW_MASTER)
         (void)sequence;
         memcpy(masterSnapshot, snapshot, sizeof(snapshot));
-#else
-        uint8_t staged[proto::PageCount][proto::FrameSize];
-        proto::makePages(snapshot, sequence, staged);
-        ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-        {
-            memcpy(pages, staged, sizeof(pages));
-        }
-#endif
     }
 
     // Valider først, endre modus etterpå. Et avvist argument starter ikke et forsøk.
@@ -251,7 +168,7 @@ namespace control_runtime
         }
         if (op == Command::Arm)
         {
-            if (!hw::motorReady())
+            if (!watchdogReady || !hw::motorReady())
             {
                 return Result::NotConfigured;
             }
@@ -519,47 +436,42 @@ namespace control_runtime
 {
     void begin()
     {
-        hw::begin();
+        bool hardwareConfigured = hw::begin();
         hw::stop();
-#if defined(LINEFOLLOW_MASTER)
-        Wire.begin();
-        Wire.setClock(sidecfg::ClockHz);
-        Wire.setWireTimeout(sidecfg::TimeoutUs, true);
-#else
-        Wire.begin(cfg::NanoAddress);
-        Wire.onReceive(onReceive);
-        Wire.onRequest(onRequest);
-#endif
+
         scheduler.next = micros();
         lastHeartbeat = micros();
         publish(0);
-        wdt_enable(WDTO_120MS);
+        if (!hardwareConfigured)
+        {
+            fail(Fault::Configuration);
+        }
+
+        watchdogReady = platform_runtime::beginWatchdog();
+        if (!watchdogReady)
+        {
+            fail(Fault::Watchdog);
+        }
     }
 
     void tick()
     {
-        wdt_reset();
+        platform_runtime::feedWatchdog();
         uint32_t now = micros();
         if (heartbeat)
         {
-            ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-            {
-                heartbeat = false;
-            }
+            heartbeat = false;
             lastHeartbeat = now;
         }
         if (stopRequested)
         {
-            ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-            {
-                stopRequested = false;
-                lastSequence = stopSequence;
-            }
+            stopRequested = false;
+            lastSequence = stopSequence;
             lastResult = Result::Ok;
             armed = false;
             idle();
         }
-        if (armed && (now - lastHeartbeat) / 1000 > cfg::NanoLeaseMs)
+        if (armed && (now - lastHeartbeat) / 1000 > cfg::HostLeaseMs)
         {
             fail(Fault::LinkLost);
         }
@@ -568,15 +480,12 @@ namespace control_runtime
             cycle(now);
             return;
         }
-        // Kommando- og snapshotarbeid skjer i ledig tid, aldri inne i I2C-avbruddet.
+        // Kommandoer behandles i ledig tid. Encoder-avbruddene håndteres i hardware.cpp.
         if (pending && int32_t(scheduler.next - micros()) > int32_t(cfg::CommandSlackUs))
         {
             uint8_t message[proto::FrameSize];
-            ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-            {
-                memcpy(message, mailbox, sizeof(message));
-                pending = false;
-            }
+            memcpy(message, mailbox, sizeof(message));
+            pending = false;
             if (Command(message[2]) == Command::Latch)
             {
                 command(message);
@@ -616,19 +525,15 @@ namespace control_runtime
 
     void requestStop(uint16_t sequence)
     {
-        ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-        {
-            stopSequence = sequence;
-            stopRequested = true;
-            pending = false;
-        }
+        // Kalles fra samme Arduino-oppgave som tick(), ikke fra encoder-avbrudd.
+        stopSequence = sequence;
+        stopRequested = true;
+        pending = false;
     }
 
-#if defined(LINEFOLLOW_MASTER)
     const uint8_t* captureSnapshot()
     {
         publish(0);
         return masterSnapshot;
     }
-#endif
 } // namespace control_runtime
