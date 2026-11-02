@@ -7,6 +7,7 @@
 - [Kodestil](docs/KODESTIL.md)
 - [Protokoll](docs/PROTOKOLL.md)
 - [Minnebruk](docs/MINNEBRUK.md)
+- [Nano mot ESP32: ytelse, sensor og strømforsyning](docs/NANO_VS_ESP32.md)
 
 ## Hvorfor tolv?
 
