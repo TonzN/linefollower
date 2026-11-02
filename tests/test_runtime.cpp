@@ -37,6 +37,9 @@ int main() {
     assert(!analyzeLine(values).valid);
     values[0]=950;auto left=analyzeLine(values);assert(left.valid && left.error==-CENTER);
     values[0]=0;values[SensorCount-1]=950;auto right=analyzeLine(values);assert(right.valid && right.error==cfg::SensorPositionSpan-CENTER);
+    // Den nye linjen dekker etter oppgitt observasjon 4–5 lesere, ikke bare to.
+    for(uint8_t i=0;i<SensorCount;i++)values[i]=i<5?950:0;
+    assert(analyzeLine(values).valid);
     LineController controller;
     for(uint32_t now=0;now<500;now+=8) {LineReading r;r.valid=r.strong=true;r.quality='V';controller.update(r,now);}
     assert(controller.mode()=='T' && controller.left>0 && controller.right>0);

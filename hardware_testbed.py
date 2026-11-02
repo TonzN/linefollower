@@ -1,4 +1,4 @@
-"""Enkel fysisk testbenk: PC -> USB/Uno -> I2C/Nano.
+"""Fysisk testbenk: USB til hoved-Nano (evt. eldre Uno-bridge).
 
 Eksempel: python hardware_testbed.py --port COM5 --test sensors --seconds 5
 Dette er målinger på maskinvare, ikke Python-simulatoren fra forrige prosjekt.
@@ -57,6 +57,14 @@ class SerialBridge:
             raise BoardError('Ugyldig sensorantall i telemetri')
         if len(sample.get('raw',[])) != count or len(sample.get('calibrated',[])) != count:
             raise BoardError('Sensorlisten er ufullstendig')
+        if 'side_count' in sample:
+            side_count = sample['side_count']
+            if not isinstance(side_count,int) or not 1 <= side_count <= 25:
+                raise BoardError('Ugyldig antall ytterlesere')
+            if len(sample.get('side_raw',[])) != side_count or len(sample.get('side_indices',[])) != side_count:
+                raise BoardError('Listen med ytterlesere er ufullstendig')
+            if len(sample.get('main_indices',[])) != count:
+                raise BoardError('Posisjonslisten for midtleserne er ufullstendig')
         return sample
 
     def command(self, command):
@@ -103,7 +111,8 @@ def test_command(args):
 
 
 def flatten(sample, label, elapsed_s, received_s, gap):
-    row = {key:value for key,value in sample.items() if key not in ('kind','raw','calibrated')}
+    arrays = ('raw','calibrated','side_raw','side_indices','main_indices')
+    row = {key:value for key,value in sample.items() if key not in ('kind',*arrays)}
     row.update(label=label, nano_elapsed_s=elapsed_s, host_monotonic_s=received_s,
                skipped_between_polls=gap, mode_name=MODE_NAMES.get(sample['mode'],'unknown'),
                fault_name=FAULT_NAMES.get(sample['fault'],'unknown'))
@@ -111,8 +120,8 @@ def flatten(sample, label, elapsed_s, received_s, gap):
         output = {'voltage_mv':'voltage_v','current_ma':'current_a','left_rpm_x10':'left_rpm','right_rpm_x10':'right_rpm'}[key]
         value = sample.get(key)
         row[output] = value/scale if value is not None else None
-    for name in ('raw','calibrated'):
-        row.update({f'{name}_{i}':value for i,value in enumerate(sample[name])})
+    for name in arrays:
+        row.update({f'{name}_{i}':value for i,value in enumerate(sample.get(name,[]))})
     return row
 
 

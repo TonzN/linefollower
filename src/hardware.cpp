@@ -63,11 +63,18 @@ bool begin() {
         motorOk=true;
     }
     if(cfg::Sensors==cfg::SensorBackend::Custom)sensorOk=custom_sensor::begin() && custom_sensor::maximum()>0;
-    else if(cfg::Sensors!=cfg::SensorBackend::Unconfigured) {
+    else if(cfg::Sensors==cfg::SensorBackend::QtrAnalog) {
+        // Direkte ADC-avlesning; kalibrering skjer allerede i kontroll-runtime.
+        // Unngår å dra med QTRs RC-/emitterstyring på den lille hoved-Nanoen.
+        if(cfg::EmitterPin>=0) {
+            pinMode(cfg::EmitterPin,OUTPUT);digitalWrite(cfg::EmitterPin,HIGH);delay(1);
+        }
+        sensorOk=true;
+    }
+    else if(cfg::Sensors==cfg::SensorBackend::QtrRC) {
         uint8_t pins[cfg::SensorCount];
         for(uint8_t i=0;i<cfg::SensorCount;i++)pins[i]=cfg::SensorPins[i];
-        if(cfg::Sensors==cfg::SensorBackend::QtrRC) {qtr.setTypeRC();qtr.setTimeout(cfg::QtrTimeoutUs);}
-        else {qtr.setTypeAnalog();qtr.setSamplesPerSensor(cfg::AnalogSamplesPerSensor);}
+        qtr.setTypeRC();qtr.setTimeout(cfg::QtrTimeoutUs);
         qtr.setSensorPins(pins,cfg::SensorCount);
         if(cfg::EmitterPin>=0)qtr.setEmitterPin(cfg::EmitterPin);
         sensorOk=true;
@@ -86,6 +93,15 @@ uint16_t rawMaximum() {return cfg::Sensors==cfg::SensorBackend::Custom?custom_se
 bool readSensors(uint16_t* raw) {
     if(!sensorOk)return false;
     if(cfg::Sensors==cfg::SensorBackend::Custom)return custom_sensor::read(raw,cfg::SensorCount);
+    if(cfg::Sensors==cfg::SensorBackend::QtrAnalog) {
+        for(uint8_t i=0;i<cfg::SensorCount;i++) {
+            analogRead(cfg::SensorPins[i]); // Forkast første ADC-konvertering etter kanalbytte.
+            uint32_t sum=0;
+            for(uint8_t n=0;n<cfg::AnalogSamplesPerSensor;n++)sum+=analogRead(cfg::SensorPins[i]);
+            raw[i]=sum/cfg::AnalogSamplesPerSensor;
+        }
+        return true;
+    }
     qtr.read(raw,QTRReadMode::On);return true;
 }
 void motors(int16_t left,int16_t right) {

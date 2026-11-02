@@ -7,7 +7,21 @@ struct FakeWire {
     void (*request)()=nullptr;
     std::vector<uint8_t> incoming,outgoing;
     size_t index=0;
+    std::vector<std::vector<uint8_t>> responses;
+    bool timeout=false,nack=false;unsigned transfers=0;
+    void begin() {}
     void begin(uint8_t) {}
+    void setClock(uint32_t) {}
+    void setWireTimeout(uint32_t,bool) {}
+    bool getWireTimeoutFlag() {return timeout;}
+    void clearWireTimeoutFlag() {timeout=false;}
+    void beginTransmission(uint8_t) {}
+    uint8_t endTransmission() {++transfers;return nack?1:0;}
+    uint8_t requestFrom(uint8_t,uint8_t) {
+        ++transfers;incoming.clear();index=0;
+        if(!responses.empty()) {incoming=responses.front();responses.erase(responses.begin());}
+        return uint8_t(incoming.size());
+    }
     void onReceive(void (*fn)(int)) {receive=fn;}
     void onRequest(void (*fn)()) {request=fn;}
     int available() {return int(incoming.size()-index);}

@@ -1,152 +1,113 @@
 # Linjefølger 2
 
-Ny arkitektur med **Nano for sensorer, motorer og regulering**, og **Uno for I²C-styring og USB mot PC**. Dette er et eget prosjekt. `LinjeFølger1`, den eldre mappen `LinjeFølger2` uten mellomrom og Python-simulatoren er ikke endret.
-
-## Start her
-
-1. Åpne denne mappen i CLion: `C:\Users\tonzg\CLionProjects\linjefølger 2`.
-2. Les og fyll ut `include/board_config.h` når pinner og komponentmodellene er kjent.
-3. Bygg Nano og Uno med PlatformIO. Velg korrekt Nano-bootloader før senere opplasting.
-4. Begynn med `info`, deretter sensorer og timing. Motorforsøk kommer etter verifisert oppkobling.
-
-**Standardoppsettet driver ingen motorer.** `MotorsEnabled = false`, ukjente pinner er −1, og sensorbackend er `Unconfigured`. Programmet bygger i denne tilstanden, men avviser forsøk som trenger ukonfigurert maskinvare. Ingen firmware er automatisk lastet opp til kortene.
-
-## Hva som er implementert
-
-- Fast kontrollperiode på Nano, foreløpig 8000 µs.
-- Maksimalt kontrollarbeid på 6000 µs og tillatt startforsinkelse på 1000 µs, begge konfigurerbare.
-- Måling av sensoravlesningstid, kontrollarbeid, kontrollperiode, startforsinkelse og tidsfristbrudd.
-- Stopp ved for lang kontrollrunde, for sen start under kjøring, sensorfeil eller tapt kommunikasjonslease.
-- Watchdog på Nano for blokkert programflyt. Den erstatter ikke kontrollrundens kortere tidsbudsjett.
-- I²C-pakker på 32 bytes med versjon, sekvensnummer og CRC8.
-- Frosset snapshot i flere sider. Uno setter sammen sensorverdier og timing fra samme kontrollrunde.
-- Enkel Python-testbenk for sensoropptak, kalibrering, timing, motorpådrag, PWM-sveip og linjefølging.
-- Gjenbruk av PD-, recovery- og tvetydighetslogikken fra første prosjekt.
-
-## Hva er likt som før, og hva er nytt?
-
-Regulatoren bygger på den tidligere `fase2`-koden i `LinjeFølger1`. PD-regulering, gjenfinning av mistet linje, håndtering av tvetydige målinger og motorramper er i hovedsak beholdt. Sensorposisjonen er nå normalisert over hele sensorrekken, slik at flere lesere ikke alene øker posisjonsfeilens skala. Terskler og tuning må likevel tilpasses den nye sensoren.
-
-Det gamle `main.cpp` er erstattet av to programmer: `src/nano.cpp` og `src/uno.cpp`. Maskinvaretilgang, kalibreringsflyt, tidsplanlegging, feilstopper og testkommandoer er nye. Tidligere oppstartsknapper og motoroffset er ikke videreført i denne versjonen.
+Seks direkte midtlesere på en hoved-Nano, og en andre Nano for valgte ytterlesere. PC kobles med USB til **hovedkortet**.
 
 ```text
-PC / hardware_testbed.py
-        | USB / seriell
-       Uno  (starter I²C-overføringene)
-        | I²C: kommandoer ned, måledata tilbake
-       Nano (leser sensorer, regulerer og styrer motorer)
+PC -- USB --> hoved-Nano --> motorer
+                 |  |
+     6 midtlesere | I2C
+                    |
+                ytter-Nano
+                    |
+       direkte analog / multipleksere
+                    |
+              valgte ytterlesere
 ```
 
-Uno sender for eksempel en kommando om å starte en sensortest. Nano tar imot kommandoen, utfører testen og oppdaterer måledata. Når Uno ber om data, fryser Nano ett sammenhengende målebilde som Uno henter i flere pakker. Nano kjører kontrollsløyfen selv; Uno trenger ikke sende en kommando for hver kontrollrunde. Begge kort lastes med hvert sitt program fra samme prosjekt.
+## Status
 
-`fase1` og den tidligere `fase2` var heller ikke identiske: `fase2` hadde blant annet endringer i gjenfinning, tvetydige linjefunn og regulatorverdier. Den gamle kildekodeforklaringen i `KODE_FORKLART.md` gjelder oppsettet før denne todelingen; bruk denne README-en for den nye programflyten. Git-historikken beholder den tidligere koden.
+- Gruppen observerer omtrent **to lesere over linjen på gammel sensor**, mot **4–5 på ny**. Dette er foreløpige observasjoner, ikke mål i mm eller dokumentert presisjon.
+- `0J11785` peker mot QTRX-HD-25, men oppgitt `irs47j` avviker fra produsentens `irs45j`. **Bekreft modell og A/RC-utgave før kabling.** PCB-merkingen skiller ikke alene A fra RC.
+- Ytterkortet som nå er implementert, leser **analoge spenninger**, direkte eller via mux. Det støtter ikke RC-avlesning. Direkte QTR RC er fortsatt tilgjengelig på hovedkortet.
+- Pinner er ukonfigurerte, motorer og ytterkommunikasjon deaktivert. Ingen opplasting er utført.
+- **Ytterdata logges i dette steget. Regulatoren bruker bare seks lokale lesere.** Sidesensorenes kalibrering, valg mellom flere linjefunn og bruk av ytterdata til recovery er neste steg.
+
+Produsent: [identifikasjon](https://www.pololu.com/product/4325/specs), [RC-avlesning](https://www.pololu.com/docs/0J13/2), [analog avlesning](https://www.pololu.com/docs/0J13/3).
+
+## Valgt arkitektur og alternativer
+
+| Oppsett | Fordel | Ulempe |
+| --- | --- | --- |
+| Bare seks midtlesere | Enkel lokal regulering | Smalt avlest område på ny sensor |
+| Seks midtlesere + seks direkte ytterlesere | Opptil tolv kanaler uten mux, kan dekke hele bredden | Glisnere målepunkter på sidene |
+| Seks midtlesere + multipleksede ytterlesere | Lokal midtgruppe og mulighet for alle ytterpunktene | Mer elektronikk, sekvensiell avlesning og stabiliseringstid |
+| Ett kort med nok innganger | Enklere tidskoordinering | Krever annet kort eller inngangselektronikk |
+
+Hele bredden krever ikke alle leserne: ytterste aktive lesere bestemmer dekningen. Avstanden mellom aktive lesere bestemmer detaljnivået. En smal linje kan havne mellom glisne punkter.
+
+Flere lesere kan forbedre posisjonsestimatet, men stopper ikke pendling automatisk. Støy, høyde, kalibrering, fart og PD-tuning må undersøkes. En tverrgående sensorrekke gir ikke alene et kart over neste sving. Flere svarte grupper må senere behandles som separate funn; gjennomsnitt mellom to streker kan havne på hvitt.
 
 ## Konfigurasjon
 
-`include/board_config.h` inneholder sensorantall, pinner, motorpolariteter, I²C-adresse, tidsgrenser, testgrenser og valgfritt måleutstyr.
+**Hovedkort: `include/board_config.h`**
 
-Antall lesere står foreløpig til **26** som oppgitt. Det er konfigurerbart. Avlesningsgrensesnittet til den nye sensoren er ikke gjettet ut fra antall pinner:
+- `SensorCount=6`; `SensorPins[0..5]` følger venstre–høyre rekkefølge. Sett `QtrAnalog` først etter bekreftet analogutgave.
+- A4/A5 brukes til I2C. A0–A3 og A6/A7 er de seks analoge inngangene som gjenstår på klassisk Nano. Dette gir ingen ledige ADC-innganger til strøm-/spenningsmåling uten endret oppsett.
+- `AnalogSamplesPerSensor` gir flere tidsprøver av samme kanal. Første ADC-konvertering etter kanalbytte forkastes.
+- Sett motorpinner, polaritet og eventuell enable før `MotorsEnabled` aktiveres. Pinnekontrollen avviser kollisjoner.
 
-- **QtrRC / QtrAnalog:** direkte Pololu-avlesning med eksplisitte sensorpinner, via QTRSensors 4.0.0.
-- **Custom:** eget grensesnitt i `src/custom_sensor.cpp` hvis sensoroppsettet bruker andre signaler eller en mellomliggende modul.
-- **Unconfigured:** avlesning er deaktivert inntil oppsettet er kjent.
+**Ytterkort: `include/side_config.h`**, felles fil for begge kort:
 
-Custom-adapteren returnerer foreløpig «ikke konfigurert». Den må implementeres når sensormodell og signalformat er kjent. Å fylle inn motorpinner alene gjør derfor ikke ukjent sensormaskinvare lesbar.
+- Sett `LINEFOLLOW_SIDE_ENABLED` til `1` når ytterkortet er konfigurert og tilkoblet.
+- `MainIndices` angir midtgruppens fysiske utganger. Eksempelindeksene er foreløpige.
+- Hver rad i `Inputs` er `{physicalIndex, pin, mux, channel}`. Nullbaserte indekser, sortert venstre–høyre. Velg utganger fritt uten å lese alle mellomliggende kanaler.
+- Direkte: `{0,14,-1,0}` betyr fysisk leser 0 på A0. Mux: `{0,-1,0,3}` betyr leser 0 via kanal 3 på mux 0.
+- `MuxSignalPins` angir ADC-inngangene fra to 16:1-muxer. De deler fire digitale `MuxSelectPins` (S0–S3). Enable må kobles aktiv iht. databladet.
+- `SettleUs`, `DiscardFirstAdc`, `Samples` og `ScanPeriodUs` styrer avlesning. Verdiene er antakelser som må måles.
+- `PollPeriodUs`, `MaxAgeMs`, `ClockHz`, `TimeoutUs` og `ServiceSlackUs` styrer overføring og aldersgrense.
+- Ikke koble samme sensorutgang til begge kort. Bruk felles GND og passende I2C-pullups. Kun hovedkortet skal eventuelt styre sensorbrettets emitterpinner. Begge emittergrupper må være på for dette opptaksoppsettet.
 
-Pinnekonfigurasjonen kontrollerer duplikater, I²C-pinner og gyldige PWM-/enkoderpinner for klassisk Nano. Den kan ikke verifisere ledninger eller en fremtidig Custom-adapters interne bruk av pinner. Eventuell driver-enable-/standby-pin bør kobles og konfigureres der driveren støtter det.
+Indekslistene er metadata, ikke mm. Regulatoren normaliserer fortsatt seks jevnt plasserte lokale lesere til 0–5000. Ujevn plassering av midtlesere krever endret posisjonsberegning.
 
-Regulatorverdier står i `include/control/conf.h`, `recovery_conf.h`, `capture_conf.h` og `ambiguous_conf.h`. Gamle motor-/knappepinner er fjernet fra regulatorfilen.
+## Timing og overføring
 
-**Posisjonsskala:** sensorrekken normaliseres til `SensorPositionSpan`, som nå er 0–5000 med sentrum 2500. Det beholder omtrent samme feilenhet som den gamle seksleser-varianten. Antall sterke lesere, kontrastgrenser og regulatorverdier må fortsatt tunes til den nye sensoren og geometrien. `LINE_MAX_WIDTH` er fortsatt en grense i antall lesere.
+Hovedkortet kjører lokal regulering hver 8000 us, med foreløpig arbeidsgrense 6000 us og tillatt startforsinkelse 1000 us. For sen start under motorforsøk, for lang kontrollrunde, lokal sensorfeil eller utløpt PC-lease gir stopp. Watchdog dekker fastlåst programflyt. Dette er konfigurerte grenser, ikke målte garantier.
 
-## Bygg i CLion / PlatformIO
+Ytterkortet leser én kanal per løkkegjennomgang og publiserer bare hele skann. Hovedkortet ber om et frosset sett og henter 32-byte pakker med CRC og felles sekvensnummer. Forrige komplette sett beholdes ved overføringsfeil. Én bussoperasjon utføres per servicekall når tidsplanleggeren viser nok ledig tid. Mål virkelig bussvarighet og startforsinkelse; timeout beviser ikke maksimal tid for en hel transaksjon.
 
-CMake-prosjektet gir CLion to kjørbare testmål: `runtime_tests` og `nano_runtime_tests`. Hvis PlatformIO finnes, finnes også mål for `firmware_nano` og `firmware_uno`.
+Begge kort arbeider parallelt uten tråder. Verken venstre/høyre eller midt-/yttergruppene er nødvendigvis lest samtidig. USB-rapporten sendes i små deler når TX-bufferen har plass.
 
-Fra terminalen i prosjektmappen:
+JSON/CSV inneholder `side_sequence`, `side_scan_us`, `side_age_ms`, `side_fresh`, `side_raw`, `side_indices` og `main_indices`. Alder regnes konservativt fra skannestart, inkludert overføringstid, ved PC-snapshot. Ukjente/foreldede ytterverdier blir null/tomme felt. Reell null beholdes. Ytterverdiene er rå ADC, uten egen kalibrering.
+
+PC-opptak er nedprøvde og inneholder ikke alle kontrollrunder eller sideskann. Normal loggrate er ikke egnet til å karakterisere høyfrekvent sensorstøy.
+
+## Bygg og tester
+
+Åpne denne mappen i CLion. CMake bygger fem C++-testmål. Python-testene kjøres av testskriptet:
 
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e nano -e uno
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e master_nano -e side_nano
+.\.venv\Scripts\python.exe tools/run_tests.py
 ```
 
-`nano` bruker `nanoatmega328`. Alternativet `nano_new_bootloader` bruker `nanoatmega328new`. Byggearkitektur er den samme; korrekt bootloader/opplastingsvalg må bekreftes for kortet deres.
+Miljøer med suffikset `_new_bootloader` finnes for begge Nanoer. Velg korrekt variant før opplasting.
 
-## Hardware-testbenken
+Bygg også med den faktiske sensor-/motorprofilen aktivert. Ukonfigurerte verdier kan få kompilatoren til å fjerne kode. En byggekontroll med seks analoge midtlesere, motorutganger, ytterkommunikasjon og 19 multipleksede ytterlesere ga hovedkortet 1450 byte statisk RAM / 29292 byte flash, og ytterkortet 495 / 3924 byte. Stack og virkelig kjøretid må fortsatt måles. Prøvetildelingene er ikke lagret som robotens pinner.
 
-Opprett Python-miljø og installer seriell støtte:
+## Hardware-testbenk
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe hardware_testbed.py --list-ports
+.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sensors --seconds 5
 ```
 
-Et miljø med pyserial er allerede opprettet på denne maskinen. USB-porten nedenfor er et eksempel og må byttes til Uno sin port:
+Koble PC til hoved-Nano. Tester: `info`, `sensors`, `calibrate`, `timing`, `motor`, `sweep`, `follow`. Motorforsøk krever `--confirm-motion` og armering via programmet. Kalibrering gjelder midtgruppen og lagres bare i RAM. CSV/JSON lagres under `runs/`; råopptak overskrives ikke.
 
-```powershell
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test info
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test timing --seconds 5
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sensors --seconds 5 --label "lyst gulv, motor av"
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test calibrate --seconds 5
-```
+Start med sensoropptak og timing. Noter høyde, underlag, lys og forsyning manuelt. Mål kontrast, sideskannetid, alder på ytterdata og maksimal kontrolltid før tuning. PWM er pådrag, ikke kraft eller moment. RPM, strøm og spenning krever egne målekretser.
 
-Under kalibrering føres alle lesere manuelt over både underlag og linje. Motorene står stille. Rå min/maks oppdateres fra én avlesning per kontrollrunde, og kalibrerte verdier beregnes fra samme råprøve. Dette erstatter det gamle bibliotekets blokkerende flermålingskalibrering. Kalibreringen ligger bare i RAM og må gjøres etter Nano-omstart.
+## Filkart og gjenbruk
 
-Motorforsøk krever konfigurert maskinvare, `MotorsEnabled = true`, og et eksplisitt flagg i PC-programmet:
+- `src/master.cpp`: USB-kommandoer, oppdelt JSON-sending og koordinering.
+- `src/nano.cpp`: felles kontroll-runtime, også brukt av eldre oppsett.
+- `src/side_nano.cpp`: analog avlesning og komplette, frosne sideskann.
+- `src/side_link.cpp`: henting, validering og målealder på hovedkortet.
+- `src/hardware.cpp`: lokale sensorer, motorer og valgfritt måleutstyr.
+- `include/side_protocol.h`: byteformat for sidemålinger.
+- `src/control/`: gjenbrukt PD, recovery og ramper.
+- `hardware_testbed.py`: PC-programmet og CSV-/JSON-opptak.
 
-```powershell
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test motor --left 60 --right 0 --seconds 2 --confirm-motion
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sweep --side left --start 0 --end 100 --step 5 --dwell-ms 500 --confirm-motion
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test sweep --side left --start 100 --end 0 --step -5 --dwell-ms 500 --confirm-motion
-.\.venv\Scripts\python.exe hardware_testbed.py --port COM5 --test follow --seconds 10 --confirm-motion
-```
+`LINE_MAX_WIDTH` er foreløpig økt fra tre til fem sterke kjernelesere ut fra observasjonen om linjebredde. Andre regulatorverdier er ikke retunet.
 
-Standardgrensen for måleforsøk er PWM ±120 og maksimalt 30 sekunder. Grensene gjelder testkommandoene. Vanlig linjefølging bruker egne hastighetsgrenser i regulatoren, men har samme tidsgrense, lease og feilovervåking. Direkte motorforsøk bruker pådraget uten regulatorens myke PWM-rampe, slik at en virkelig stegrespons kan måles.
-
-CSV og en JSON-fil med testbetingelser/resultatstatus lagres i `runs/`. `--csv` og `--label` kan brukes til egen fil og beskrivelse. Ctrl+C eller en feil forsøker å sende STOP i `finally`. Ved brutt PC-forbindelse utløper Uno sin hostlease og deretter Nano sin motorlease. Dette er ikke en elektrisk nødstopp.
-
-## Hva kan måles automatisk nå?
-
-| Måling | Krever |
-| --- | --- |
-| Rå og kalibrerte sensorverdier | Fungerende og konfigurert sensorbackend. |
-| Kontroll- og avlesningstider | Nano-firmware. Timing uten konfigurert sensor måler ikke avlesning av den virkelige sensoren. |
-| Faktisk pådrag og testtrinn | Motorpinner/driver konfigurert. Pådrag er ikke målt kraft. |
-| Spenning og strøm | Egne målekretser på konfigurerte ADC-innganger, med korrekt skala/nullpunkt. |
-| Hjul-RPM | Enkoder og pulser per hjulomdreining. Første versjon bruker enkeltkanals pulser og rapporterer bare RPM-magnitude. |
-| Kraft, moment, chassisfart og faktisk akselerasjon | Separat måleutstyr/video. Ingen av disse beregnes som om de var målt fra PWM alene. |
-
-Manglende spenning/strøm/enkoder gir `null` i telemetri og tomme felt i CSV. Reelle nullverdier beholdes som null. En PWM-sveip kjører automatisk, men start-/gangterskler må etterpå vurderes mot RPM eller video. Programmet påstår ikke at det har funnet en terskel uten bevegelsesmåling.
-
-PC-opptakene er **nedprøvd telemetri**, ikke hver eneste 8-ms-runde. Hver rad har Nano-tidsstempel og sekvensnummer; hull mellom PC-prøver rapporteres. Min/maks kontrolltid og tidsfristtellere oppdateres på Nano for alle runder. Det finnes ennå ingen fullhastighets rådatabuffer. Høyfrekvent sensorstøy og raske transienter krever en senere opptaksmodus eller eksternt måleutstyr.
-
-`encoder_age_ms` viser alder siden siste RPM-oppdatering. RPM-feltene er tomme frem til første enkodervindu er ferdig. `quality` og `control_mode` viser henholdsvis sensoranalysens kvalitet og regulatorens kjøremåte. Eksisterende CSV-/JSON-opptak overskrives ikke.
-
-## Tidsmodell og kommunikasjon
-
-Nano prioriterer kontrollsløyfen. Neste planlagte tidspunkt følger en fast tidsakse; ved forsinkelse telles hoppede perioder i stedet for at flere gamle runder kjøres rett etter hverandre. Kommando- og snapshotarbeid kjøres i ledig tid. I²C-avbruddene kopierer bare kommandoer/ferdige sider og validerer faste pakker; de kjører ikke sensor eller regulator.
-
-`cycle_us` omfatter sensor, regulering, motorutgang og valgfri ADC-/enkoderoppdatering. Snapshotarbeid utenfor kontrollrunden fanges gjennom startforsinkelse og hoppede perioder. `MaxCycleUs` er en kontrollert grense etter at arbeidet returnerer; den kan ikke avbryte en fastlåst driver midt i et kall. Watchdog er et separat vern mot dette.
-
-`time_us` er kontrollrundens start på Nano, ikke PC-ankomsttid. Telleren går rundt etter ca. 71,6 minutter. Differanser håndteres usignert, og PC-programmet pakker ut tiden over omløpet. Regulatoren bruker `millis()` separat, slik at micros-omløp ikke blir et kunstig stort D-tidssteg.
-
-Uno er I²C-controller, og Nano svarer på adressen `NanoAddress`. Nano bruker de faste I²C-pinnene på klassisk Uno/Nano, A4/A5, med felles GND og korrekt pullup-oppsett. Flytting av disse maskinvarepinnene krever annet grensesnitt/kort, ikke bare et nytt tall i konfigurasjonen. Eksakt øvrig kabling kommer senere.
-
-## Tester
-
-```powershell
-.\.venv\Scripts\python.exe tools/run_tests.py
-```
-
-Testene dekker CRC/snapshotpakker, tidsplanlegger og uint32-omløp, PWM-sveip, regulator, faktisk Nano-programflyt med falsk maskinvare, feilstopper, kalibrering og Python-logging. Testene trenger ikke Arduino tilkoblet. De bekrefter programlogikk og bygging, ikke virkelig sensorrespons, elektrisk kobling eller garantert kjøretid på roboten.
-
-## Filene
-
-- `src/nano.cpp`: kontrollsløyfe, testmodi, tidsmålinger og Nano sin I²C-side.
-- `src/uno.cpp`: PC-kommandoer, heartbeat og sammensetting av I²C-snapshot.
-- `src/hardware.cpp`: QTR-avlesning, pinnekontroll, motorutgang og valgfritt måleutstyr.
-- `src/custom_sensor.cpp`: avgrenset sted for den nye sensorens grensesnitt.
-- `src/control/`: gjenbrukt regulatorlogikk og ramper.
-- `include/board_config.h`: maskinvare og tidsgrenser.
-- `include/protocol.h`: felles byteformat og CRC.
-- `hardware_testbed.py`: PC-programmet for fysiske måleforsøk.
+De eldre miljøene `nano`, `nano_new_bootloader` og `uno` er beholdt for Uno-bridgen. De bruker ikke ytterkoblingen. `KODE_FORKLART.md` er historisk forklaring fra før todelingen. Git-historikk og tidligere 3D-modeller er bevart.

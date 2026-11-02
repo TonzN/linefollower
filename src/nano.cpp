@@ -20,7 +20,12 @@ using proto::Mode;using proto::Fault;using proto::Result;using proto::Command;
 volatile uint8_t selectedPage=0;
 volatile bool pending=false,heartbeat=false,stopRequested=false,dropped=false;
 volatile uint16_t stopSequence=0;
-uint8_t mailbox[proto::FrameSize],pages[proto::PageCount][proto::FrameSize];
+uint8_t mailbox[proto::FrameSize];
+#if defined(LINEFOLLOW_MASTER)
+uint8_t masterSnapshot[proto::HeaderSize+4*cfg::SensorCount];
+#else
+uint8_t pages[proto::PageCount][proto::FrameSize];
+#endif
 uint16_t raw[cfg::SensorCount]={},calibrated[cfg::SensorCount]={};
 uint16_t calibrationMin[cfg::SensorCount],calibrationMax[cfg::SensorCount];
 bool calibratedOk=false,armed=false,complete=false,sampleValid=false;
@@ -38,6 +43,7 @@ int16_t motorLeft=0,motorRight=0;
 bool motion() {return mode==Mode::Motor || mode==Mode::Sweep || mode==Mode::Follow;}
 void idle(bool finished=false) {hw::stop();mode=Mode::Idle;complete=finished;}
 void fail(Fault reason) {fault=reason;armed=false;idle();}
+#if !defined(LINEFOLLOW_MASTER)
 void onReceive(int count) {
     uint8_t message[proto::FrameSize],size=0;
     while(Wire.available()) {uint8_t value=Wire.read();if(size<proto::FrameSize)message[size++]=value;}
@@ -50,9 +56,14 @@ void onReceive(int count) {
     memcpy(mailbox,message,sizeof(mailbox));pending=true;
 }
 void onRequest() {Wire.write(pages[selectedPage],proto::FrameSize);}
+#endif
 
 void publish(uint16_t sequence) {
+#if defined(LINEFOLLOW_MASTER)
+    uint8_t snapshot[sizeof(masterSnapshot)]={};
+#else
     uint8_t snapshot[proto::SnapshotSize]={};
+#endif
     proto::put32(snapshot,sampleNumber);proto::put32(snapshot+4,sampleAt);
     proto::put16(snapshot+8,proto::saturated16(sensorUs));proto::put16(snapshot+10,proto::saturated16(cycleUs));
     proto::put16(snapshot+12,proto::saturated16(sampleNumber>1?sampleAt-lastCycleAt:cfg::ControlPeriodUs));
@@ -67,8 +78,12 @@ void publish(uint16_t sequence) {
     proto::put16(snapshot+56,proto::saturated16((micros()-lastHeartbeat)/1000));proto::put16(snapshot+58,hw::rawMaximum());proto::put16(snapshot+60,sweep.index);
     proto::put16(snapshot+62,hw::encoderAgeMs);
     for(uint8_t i=0;i<cfg::SensorCount;i++) {proto::put16(snapshot+64+2*i,raw[i]);proto::put16(snapshot+64+2*cfg::SensorCount+2*i,calibrated[i]);}
+#if defined(LINEFOLLOW_MASTER)
+    (void)sequence;memcpy(masterSnapshot,snapshot,sizeof(snapshot));
+#else
     uint8_t staged[proto::PageCount][proto::FrameSize];proto::makePages(snapshot,sequence,staged);
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {memcpy(pages,staged,sizeof(pages));}
+#endif
 }
 
 Result command(const uint8_t* frame) {
@@ -156,7 +171,11 @@ void cycle(uint32_t now) {
 
 void setup() {
     hw::begin();hw::stop();
+#if defined(LINEFOLLOW_MASTER)
+    Wire.begin();Wire.setClock(sidecfg::ClockHz);Wire.setWireTimeout(sidecfg::TimeoutUs,true);
+#else
     Wire.begin(cfg::NanoAddress);Wire.onReceive(onReceive);Wire.onRequest(onRequest);
+#endif
     scheduler.next=micros();lastHeartbeat=micros();publish(0);wdt_enable(WDTO_120MS);
 }
 void loop() {

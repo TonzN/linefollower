@@ -55,7 +55,9 @@
     // Minste forskjell mellom høyeste/laveste sensor. Høyere krever tydeligere kontrast mot underlaget.
     const uint16_t LINE_MIN_CONTRAST = 300;
     // Maks antall sterke sensorer i valgt gruppe. Høyere godtar bredere linjer/felt.
-    const uint8_t LINE_MAX_WIDTH = 3;
+    // Foreløpig tilpasset observasjonen om 4–5 lesere over linjen på ny sensor.
+    // Dette er antall sterke kjernelesere; må verifiseres etter kalibrering.
+    const uint8_t LINE_MAX_WIDTH = 5;
     // Prosent av største bakgrunnskorrigerte utslag som regnes som sterkt. Høyere ignorerer flere svake sideutslag.
     const uint8_t CORE_PERCENT = 50;
     // Valgt gruppe må ha minst så mange ganger vekten til øvrige sterke grupper samlet.

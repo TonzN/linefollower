@@ -18,7 +18,8 @@ constexpr uint32_t CommandSlackUs = 1500;
 constexpr uint32_t MaxTestMs = 30000;
 constexpr int16_t MaxTestPwm = 120;
 constexpr uint16_t CalibrationMinimumSpan = 30;
-constexpr uint8_t SensorCount = 26;
+// Hovedkortet leser seks sentrale kanaler direkte. Ytterkort: side_config.h.
+constexpr uint8_t SensorCount = 6;
 constexpr int SensorPositionSpan = 5000;
 
 enum class SensorBackend : uint8_t { Unconfigured, QtrRC, QtrAnalog, Custom };

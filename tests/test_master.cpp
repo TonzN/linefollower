@@ -1,0 +1,47 @@
+#include <iostream>
+#include "Arduino.h"
+#include "Wire.h"
+#include "hardware.h"
+#include "side_link.h"
+uint32_t fakeMicros=0;
+FakeWire Wire;FakeSerial Serial;
+namespace hw {
+int16_t appliedLeft=0,appliedRight=0,currentMa=0,leftRpm10=0,rightRpm10=0;
+uint16_t measurementFlags=0,voltageMv=0,encoderAgeMs=0;
+bool begin() {return true;}
+bool sensorReady() {return true;}
+bool motorReady() {return true;}
+bool readSensors(uint16_t* raw) {for(uint8_t i=0;i<cfg::SensorCount;i++)raw[i]=100;return true;}
+uint16_t rawMaximum() {return 1023;}
+void motors(int16_t l,int16_t r) {appliedLeft=l;appliedRight=r;}
+void stop() {motors(0,0);}
+void updateMeasurements(uint32_t) {}
+}
+namespace side_link {
+sideproto::Sample value;
+bool isFresh=false;
+void service(uint32_t) {}
+const sideproto::Sample& latest() {return value;}
+uint16_t ageMs(uint32_t) {return isFresh?4:65535;}
+bool fresh(uint32_t) {return isFresh;}
+}
+#include "../src/master.cpp"
+void dispatch(const char* text) {char line[96];strcpy(line,text);host::dispatch(line);}
+void drain() {
+    for(unsigned i=0;i<500;i++) {Serial.space=64;host::output();}
+}
+int main() {
+    setup();fakeMicros=0xF1234567;sampleAt=fakeMicros;
+    dispatch("POLL");Serial.space=0;host::output();assert(Serial.outgoing.empty());
+    drain();std::cout << Serial.outgoing;assert(Serial.outgoing.back()=='\n');
+    Serial.outgoing.clear();side_link::isFresh=true;side_link::value.valid=true;
+    side_link::value.raw[0]=0;side_link::value.raw[1]=950;
+    dispatch("POLL");
+    // STOP må virke selv om en stor rapport fortsatt venter på UART-plass.
+    armed=true;mode=Mode::Motor;hw::motors(30,30);
+    dispatch("STOP");controlLoop();assert(!armed && hw::appliedLeft==0);
+    drain();std::cout << Serial.outgoing;
+    Serial.outgoing.clear();dispatch("MOTOR rubbish");drain();
+    assert(Serial.outgoing.find("error")!=std::string::npos);
+    std::cout << "Master: nonblocking UART, unsigned micros, side telemetry and priority STOP OK\n";
+}

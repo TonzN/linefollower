@@ -46,6 +46,16 @@ class FakeSerial:
 
 
 class Tests(unittest.TestCase):
+    def test_side_values_and_physical_indices_in_csv(self):
+        s=sample(side_count=2,side_raw=[0,None],side_indices=[0,24],main_indices=[11,12],side_fresh=0)
+        row=testbed.flatten(s,'side',0,0,0)
+        self.assertEqual(row['side_raw_0'],0)
+        self.assertIsNone(row['side_raw_1'])
+        self.assertEqual(row['side_indices_1'],24)
+        self.assertNotIn('side_raw',row)
+        serial=FakeSerial([json.dumps(dict(s,side_count=3)).encode()])
+        with self.assertRaises(testbed.BoardError): testbed.SerialBridge(serial).poll()
+
     def test_duration_and_sweep_endpoints(self):
         self.assertEqual(testbed.test_command(options(test='sweep')),('SWEEP 1 0 12 5 100',0.4))
         self.assertEqual(testbed.test_command(options(test='sweep',end=-100,step=-5))[1],2.1)

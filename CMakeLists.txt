@@ -16,6 +16,15 @@ target_link_libraries(nano_runtime_tests PRIVATE line_controller)
 enable_testing()
 add_test(NAME protocol_scheduler_controller COMMAND runtime_tests)
 add_test(NAME actual_nano_runtime COMMAND nano_runtime_tests)
+foreach(name master side_link)
+    add_executable(${name}_tests tests/test_${name}.cpp)
+    target_include_directories(${name}_tests BEFORE PRIVATE tests/fakes)
+    target_link_libraries(${name}_tests PRIVATE line_controller)
+    add_test(NAME ${name}_runtime COMMAND ${name}_tests)
+endforeach()
+add_executable(side_nano_tests tests/test_side_nano.cpp)
+target_include_directories(side_nano_tests PRIVATE tests/side_config tests/fakes include)
+add_test(NAME actual_side_nano_runtime COMMAND side_nano_tests)
 
 find_program(PLATFORMIO_EXECUTABLE NAMES platformio pio
     HINTS "$ENV{USERPROFILE}/.platformio/penv/Scripts")
@@ -24,4 +33,8 @@ if(PLATFORMIO_EXECUTABLE)
         COMMAND "${PLATFORMIO_EXECUTABLE}" run -d "${CMAKE_SOURCE_DIR}" -e nano VERBATIM)
     add_custom_target(firmware_uno
         COMMAND "${PLATFORMIO_EXECUTABLE}" run -d "${CMAKE_SOURCE_DIR}" -e uno VERBATIM)
+    add_custom_target(firmware_master_nano
+        COMMAND "${PLATFORMIO_EXECUTABLE}" run -d "${CMAKE_SOURCE_DIR}" -e master_nano VERBATIM)
+    add_custom_target(firmware_side_nano
+        COMMAND "${PLATFORMIO_EXECUTABLE}" run -d "${CMAKE_SOURCE_DIR}" -e side_nano VERBATIM)
 endif()
