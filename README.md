@@ -4,7 +4,7 @@
 
 - [Robot og pinnevalg](docs/LINJEFOLGEREN.md)
 - [Kode forklart](KODE_FORKLART.md)
-- [Simulering – oppstart, modell og begrensninger](docs/SIMULASJON.md)
+- [Simulering – egen branch med kode og dokumentasjon](https://github.com/TonzN/linefollower/tree/codex/simulering)
 - [Kodestil](docs/KODESTIL.md)
 - [Protokoll](docs/PROTOKOLL.md)
 - [Minnebruk](docs/MINNEBRUK.md)
