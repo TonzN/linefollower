@@ -1,0 +1,10 @@
+[project]
+name = "linjefolger-testbed"
+version = "0.1.0"
+description = "Konfigurerbar emulator for gruppens linjefølger"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pyright]
+include = ["testbed", "tests", "tools"]
+pythonVersion = "3.10"

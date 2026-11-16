@@ -1,0 +1,20 @@
+hjul friksjon:
+hjul radius: 
+overflate friksjon: 
+
+RPM faktisk:
+RPM etter spennings nivå:
+Motor reaksjons tid per endring av pwm: 
+Akselerasjon:
+topp fart: 
+Start terskel: 
+Gangterskel: 
+
+Spennings nivå:
+Sensor Avlesnings tid:
+Sensor Avlesnings nøyaktighet: 
+Sensor avik: 
+CPU iterasjon tid:
+
+totall vekt: 
+

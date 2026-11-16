@@ -1,0 +1,7 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {"name": "Emulator – vindu", "type": "debugpy", "request": "launch", "module": "testbed", "cwd": "${workspaceFolder}", "console": "integratedTerminal"},
+    {"name": "Emulator – 20 sek og CSV", "type": "debugpy", "request": "launch", "module": "testbed", "args": ["--headless", "--seconds", "20", "--csv", "runs/debug.csv"], "cwd": "${workspaceFolder}", "console": "integratedTerminal"}
+  ]
+}

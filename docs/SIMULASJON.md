@@ -4,13 +4,15 @@ Simulatoren lar gruppen prøve styringen på en virtuell bane og undersøke hvor
 
 ## Status og plassering
 
-Simulatoren ble laget 29. oktober 2026 og ligger lokalt i:
+Simulatorprosjektet ligger under [simulator/](../simulator/) på branchen `codex/simulering`. Der finnes kildekode, konfigurasjoner, firmware-snapshot, tester og detaljert dokumentasjon.
 
-```text
-C:\Users\tonzg\OneDrive\Dokumenter\LinjeFølger_testbed
+Klon repoet og gå inn i simulatormappen før du kjører kommandoene i denne veiledningen:
+
+```powershell
+git clone --branch codex/simulering --single-branch https://github.com/TonzN/linefollower.git
+cd linefollower/simulator
+python -m venv .venv
 ```
-
-Denne veiledningen er publisert i linjefølgerrepoet. Selve simulatorprosjektet ligger foreløpig i den separate lokale mappen. En kloning av dette GitHub-repoet gir derfor ikke simulatorfilene. Kommandoene nedenfor kjøres fra simulatorens mappe.
 
 Styringen er en Python-port av C++-koden fra `LinjeFølger1`, med en referansekopi datert 29. oktober i `firmware/`. `firmware/manifest.json` inneholder SHA-256-kontrollsummer. Porten representerer den eldre Nano-styringen med seks sensorer i standardprofilen. Den senere ESP32-versjonens åtte RC-kanaler, knapper og kalibreringslys må testes på maskinvaren.
 
@@ -95,7 +97,7 @@ Kontrollert 16. november 2026:
 
 - Kjøring uten vindu i ett simulert sekund fullførte.
 - C++-sammenligningen bestod 21 361 kontrollrunder og 36 tilstandsfelt, med modusene T, G, U, B, R, A og S. Kontrollsummene til snapshoten ble verifisert.
-- 18 av 19 programtester bestod. `test_power_sag_and_discharge` feilet på kravet `robot.voltage < 6`, med målt modellverdi omtrent 8,9166 V. Årsaken til dette testavviket gjenstår å undersøke.
+- Alle 19 programtester bestod. Batteritesten er rettet til å sammenligne spenningsfallet med forsyningsspenningen i testprofilen. Den tidligere faste grensen på 6 V passet ikke testprofilens 9 V.
 
 Referansesammenligningen gjelder seks sensorer og originalkonstantene. Flyttall sammenlignes med toleranse, siden Python og C++ bruker forskjellig presisjon.
 
@@ -127,3 +129,5 @@ Det finnes foreløpig ingen RL-agent, belønningsfunksjon eller treningsgrensesn
 | `docs/KONFIGURASJON.md` | Detaljert beskrivelse av alle modellparametrene |
 | `docs/MALEPLAN_OG_MODELL.md` | Måleplan og modelluttrykk for videre arbeid |
 | `measurements/` | Maler for fysiske målinger |
+
+Detaljerte veiledninger: [konfigurasjon](../simulator/docs/KONFIGURASJON.md), [måleplan og modelluttrykk](../simulator/docs/MALEPLAN_OG_MODELL.md), [simulatorens README](../simulator/README.md).

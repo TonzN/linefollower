@@ -1,0 +1,18 @@
+{
+  "source_directory": "C:\\Users\\tonzg\\CLionProjects\\LinjeFølger1",
+  "snapshot_date": "2026-10-29",
+  "sha256": {
+    "ambiguous_conf.h": "4e0b820c620f4465ba26e8bae4c5e9e2ce6ba0d8e65c231baf6d23d5c254c38d",
+    "capture_conf.h": "b33c3d17c6b8ab6b785a2c173573a1aca19cc0c63fcb443fe673b94abafc04b6",
+    "conf.h": "527823015433a54f658083bbc19c57038daa872e9646efaef7bae3668b0ffe2d",
+    "helper.h": "9f37171773ad2fb986d94cc61daa1ab4c8c1101cc1ac221a46ba73a22775766a",
+    "linefollow.h": "71e1624211568758199881831eccd6fa6ea8ca63ee4c53fd1e22cfbfaed02898",
+    "motor.h": "f78f398dea09568f1f0e961d8f410b2714418613bb74250bcdf5749022c95392",
+    "recovery_conf.h": "554b077de571bb1b865d71d4554ecef61a37167d4b6ee815e0cf0a176d3b48a5",
+    "helper.cpp": "f310e85faad31ed523c5b1e71090cf9caa254ee29aa60898c812445d9eb66624",
+    "linefollow.cpp": "cd3695fb5067b17f8d0b5d1a4f4d047eeba19a1575249ef1d2cf0382efb2a08f",
+    "main.cpp": "7f8d432b4ab5f6d4291b6e94da199fa82c1f11d2e0fe808e41d5f1e74339899c",
+    "motor.cpp": "1541afbd316686abae33f05793567c6775d31f5c097c8f4c1e9977cb6c54fa5f",
+    "platformio.ini": "93aee2b673d0f88f19e49e246c6c38339ffb95aaa2404b8cc171d4201d1ebd96"
+  }
+}

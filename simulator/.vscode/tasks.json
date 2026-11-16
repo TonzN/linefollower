@@ -1,0 +1,8 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {"label": "Kjør emulator", "type": "process", "command": "${workspaceFolder}/.venv/Scripts/python.exe", "args": ["-m", "testbed"], "problemMatcher": []},
+    {"label": "Test emulator", "type": "process", "command": "${workspaceFolder}/.venv/Scripts/python.exe", "args": ["-m", "unittest", "discover", "-s", "tests", "-v"], "group": "test", "problemMatcher": []},
+    {"label": "Sammenlign med C++", "type": "process", "command": "${workspaceFolder}/.venv/Scripts/python.exe", "args": ["tools/verify_firmware.py"], "problemMatcher": []}
+  ]
+}
