@@ -1,9 +1,5 @@
-.pio/
-.idea/
-.idea_bakcup/
-.venv/
-__pycache__/
+**/.venv/
+**/__pycache__/
 *.pyc
-runs/
-build/
-*.exe
+**/build/
+**/runs/

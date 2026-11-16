@@ -1,13 +1,12 @@
-# Arbeidsregler for dette prosjektet
+# Arbeidsregler for simulatoren
 
-- Prioriter kode som gruppen kan lese, forstå og videreutvikle.
-- Følg `.clang-format` og `docs/KODESTIL.md` for C++.
-- Én handling per linje. Bruk klammer og flere linjer også for korte if-/løkkeblokker.
-- Én variabeldeklarasjon per linje. Bruk navn som beskriver rolle og enhet.
-- Unngå nestede ternære uttrykk og lange, komprimerte betingelser.
-- Skill logiske steg med blanklinjer. Ikke komprimer kode for å spare vertikal plass.
-- Kommenter hensikt, enheter, tidskrav, maskinvareantakelser og uventede valg.
-- Oppdater kildekodeveiledningen og robotdokumentasjonen når programflyten endres.
-- Ikke påstå at flere lesere løser pendling eller at programtester beviser fysisk timing.
-- Mål flash og statisk RAM med både standardoppsett og aktivert maskinvareprofil.
-- Behold feilstopper, alderskontroll og kontrollperioden når minne optimaliseres.
+- Prioriter kode og dokumentasjon gruppen kan lese og videreutvikle.
+- Simulatorprosjektets rot er `simulator/`. Kjør Python-kommandoer derfra.
+- Hold styring, sensor-/banemodell, fysikk og visning adskilt.
+- Kommenter hensikt, enheter, tidsmodell og modellantakelser.
+- Oppdater kodeveiledning og modellbeskrivelse ved endringer i programflyten.
+- Behold `simulator/firmware/` som kontrollsummert referanse. Endring av snapshot er et eget, eksplisitt arbeid.
+- Kjør `python -m unittest discover -s tests -v` etter relevante kodeendringer.
+- Ved endringer i styringsporten skal også `python tools/verify_firmware.py` kjøres.
+- Programtester og C++-sammenligning bekrefter modellens og styringsportens oppførsel. Fysisk realisme må valideres mot robotmålinger.
+- Loggfiler, build og virtuelle miljøer skal holdes utenfor Git.

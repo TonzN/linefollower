@@ -1,5 +1,7 @@
 # Simulering av linjefølgeren
 
+Se også [kodeveiledning](../simulator/docs/KODE_FORKLART.md) og [teknologioversikt](../simulator/docs/TEKNOLOGIER.md).
+
 Simulatoren lar gruppen prøve styringen på en virtuell bane og undersøke hvordan sensorplassering, motorrespons, grep og strømforsyning påvirker kjøringen.
 
 ## Status og plassering

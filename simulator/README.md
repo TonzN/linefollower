@@ -1,5 +1,9 @@
 # LinjeFølger testbed
 
+- [Kode forklart](docs/KODE_FORKLART.md)
+- [Teknologier](docs/TEKNOLOGIER.md)
+- [Samlet simuleringsveiledning](../docs/SIMULASJON.md)
+
 **Trinn 1: en kjørbar Python-emulator av linjefølgeren, med en enkel fysisk modell og pillebane.** Prosjektet er klart til å åpnes som mappe i VS Code.
 
 Arduino-styringen er portert fra `C:\Users\tonzg\CLionProjects\LinjeFølger1` 29. oktober 2026. Originalprosjektet er ikke endret. En kopi av firmware og SHA-256-kontrollsummer ligger i `firmware/`.
