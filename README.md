@@ -4,6 +4,7 @@
 
 - [Robot og pinnevalg](docs/LINJEFOLGEREN.md)
 - [Kode forklart](KODE_FORKLART.md)
+- [Simulering – oppstart, modell og begrensninger](docs/SIMULASJON.md)
 - [Kodestil](docs/KODESTIL.md)
 - [Protokoll](docs/PROTOKOLL.md)
 - [Minnebruk](docs/MINNEBRUK.md)
